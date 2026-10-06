@@ -236,7 +236,7 @@ def check_fonts() -> None:
 
 
 def check_output(path: str) -> None:
-    print(f"[6] 成片核验 {path}")
+    section(f"[6] 成片核验 {path}")
     p = Path(path)
     if not p.is_absolute():
         p = ROOT / p
@@ -284,6 +284,17 @@ def check_output(path: str) -> None:
     else:
         ok(f"音频 {a['codec_name']} {a.get('sample_rate')}Hz {a.get('channels')}ch")
 
+    # 把量到的规格写进 info：--json 模式下这些数字就是给 Agent 和报告用的证据
+    if v is not None:
+        fps_raw = v.get("r_frame_rate", "0/1")
+        add("info", "output_spec",
+            f"{v['width']}x{v['height']} @{fps_raw} {v['codec_name']} {v.get('pix_fmt')} "
+            f"color={v.get('color_space', '未标记')}/{v.get('color_range', '未标记')}",
+            str(p))
+    if a is not None:
+        add("info", "output_audio_spec",
+            f"{a['codec_name']} {a.get('sample_rate')}Hz {a.get('channels')}ch", str(p))
+
     # 响度与峰值
     proc = subprocess.run(["ffmpeg", "-hide_banner", "-i", str(p),
                            "-af", "volumedetect", "-f", "null", "-"],
@@ -315,6 +326,9 @@ def check_output(path: str) -> None:
     if lufs:
         got = float(lufs[-1])
         ok(f"整体响度 {got} LUFS")
+        add("info", "loudness",
+            f"integrated={got} LUFS  max={peak.group(1) if peak else '?'}dB  "
+            f"mean={mean.group(1) if mean else '?'}dB", str(p))
         if not -24 <= got <= -12:
             warn(f"{got} LUFS 偏离常见投放区间（-24 ~ -12）")
             add("warn", "loudness_range", f"integrated={got} LUFS", str(p))

@@ -4,12 +4,12 @@
 <meta charset="utf-8" />
 <title>web-video-produce :: HTML + Canvas + GSAP 逐帧模板</title>
 <!--
-  帧协议（让 capture_frames.mjs / Remotion / 任何截图器都能拿到确定性画面）：
-    ?frame=120&fps=30&duration=360
-    1) 所有动画由 FRAME 推导，不用 requestAnimationFrame 累加时间
-    2) 画完把 window.__FRAME_READY__ = true
-    3) 不用 Math.random() / Date.now()
-  预览: 直接用浏览器打开（默认第 0 帧），改 URL 的 frame 参数看任意一帧。
+  帧协议（让 capture_frames.mjs / 任何截图器都能拿到确定性画面）：
+    1) 引入 ../frame-protocol.js，它提供 __seek(frame) / __registerTimeline / __onSeek
+    2) 所有动画由帧号推导，不用 requestAnimationFrame 累加时间、不用 CSS animation
+    3) 画完由协议自动置 window.__FRAME_READY__ = true
+  预览: 直接用浏览器打开（默认第 0 帧），改 URL 的 ?frame=120 看任意一帧。
+  截图: node scripts/capture_frames.mjs --html templates/html-gsap/index.html --outdir frames --seconds 6
 -->
 <style>
   html, body { margin: 0; height: 100%; background: #05070f; overflow: hidden; }
@@ -37,6 +37,8 @@
   <div class="cards" id="cards"></div>
 </div>
 
+<!-- 帧协议：必须最先加载（页面后面的代码要往它上面注册时间线） -->
+<script src="../frame-protocol.js"></script>
 <!-- 优先用本地 node_modules 里的 GSAP（离线渲染必须），失败再回退 CDN -->
 <script src="../../node_modules/gsap/dist/gsap.min.js"></script>
 <script>
@@ -46,57 +48,58 @@
 </script>
 <script>
 (() => {
-  const q = new URLSearchParams(location.search);
-  const FPS = Number(q.get('fps') ?? 30);
-  const FRAME = Number(q.get('frame') ?? 0);
-  const DURATION = Number(q.get('duration') ?? FPS * 10);
-  const T = FRAME / FPS;                    // 秒：一切动画的唯一时间来源
+  const P = window.__wvp;                        // 帧协议状态（由 frame-protocol.js 建立）
+  const FPS = P.fps;
   const W = innerWidth, H = innerHeight;
 
-  // ---------- 1. Canvas 2D 背景（确定性：只用 T，不用随机） ----------
+  // ---------- 1. Canvas 2D 背景（确定性：只用 t，不用随机、不用 rAF 累加） ----------
   const cv = document.getElementById('bg');
   const ctx = cv.getContext('2d');
   const dpr = Math.min(devicePixelRatio || 1, 2);
   cv.width = W * dpr; cv.height = H * dpr;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-  const g = ctx.createLinearGradient(0, 0, W, H);
-  g.addColorStop(0, '#0a1020');
-  g.addColorStop(1, '#05070f');
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, W, H);
-
-  // 波浪线：第 i 条线的相位 = T * 速度 + i，完全可复现
-  for (let i = 0; i < 46; i++) {
-    const phase = T * 1.1 + i * 0.35;
-    ctx.beginPath();
-    for (let x = 0; x <= W; x += 8) {
-      const y =
-        H * 0.62 +
-        Math.sin(x * 0.006 + phase) * 46 +
-        Math.sin(x * 0.017 - phase * 0.7) * 18 +
-        i * 3.2;
-      x === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
-    }
-    ctx.strokeStyle = `hsla(${168 + i * 2.2}, 78%, ${52 + (i % 7) * 3}%, ${0.05 + (i % 5) * 0.035})`;
-    ctx.lineWidth = 1 + (i % 3) * 0.6;
-    ctx.stroke();
-  }
-
-  // 粒子：用整数哈希代替 Math.random()
+  // 整数哈希代替 Math.random()：同样的 i 永远同样的值
   const rand = (n) => {
     const x = Math.sin(n * 12.9898) * 43758.5453;
     return x - Math.floor(x);
   };
-  for (let i = 0; i < 120; i++) {
-    const sx = rand(i) * W;
-    const sy = (rand(i + 99) * H + T * (12 + rand(i + 7) * 40)) % H;
-    const r = 0.6 + rand(i + 31) * 1.9;
-    ctx.beginPath();
-    ctx.arc(sx, sy, r, 0, Math.PI * 2);
-    ctx.fillStyle = `rgba(94,234,212,${0.12 + rand(i + 5) * 0.35})`;
-    ctx.fill();
-  }
+
+  const drawBackdrop = (frame, t) => {
+    const g = ctx.createLinearGradient(0, 0, W, H);
+    g.addColorStop(0, '#0a1020');
+    g.addColorStop(1, '#05070f');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+
+    // 波浪线：第 i 条线的相位 = t * 速度 + i，完全可复现
+    for (let i = 0; i < 46; i++) {
+      const phase = t * 1.1 + i * 0.35;
+      ctx.beginPath();
+      for (let x = 0; x <= W; x += 8) {
+        const y =
+          H * 0.62 +
+          Math.sin(x * 0.006 + phase) * 46 +
+          Math.sin(x * 0.017 - phase * 0.7) * 18 +
+          i * 3.2;
+        x === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+      }
+      ctx.strokeStyle = `hsla(${168 + i * 2.2}, 78%, ${52 + (i % 7) * 3}%, ${0.05 + (i % 5) * 0.035})`;
+      ctx.lineWidth = 1 + (i % 3) * 0.6;
+      ctx.stroke();
+    }
+
+    // 粒子
+    for (let i = 0; i < 120; i++) {
+      const sx = rand(i) * W;
+      const sy = (rand(i + 99) * H + t * (12 + rand(i + 7) * 40)) % H;
+      const r = 0.6 + rand(i + 31) * 1.9;
+      ctx.beginPath();
+      ctx.arc(sx, sy, r, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(94,234,212,${0.12 + rand(i + 5) * 0.35})`;
+      ctx.fill();
+    }
+  };
 
   // ---------- 2. GSAP：paused 时间线 + seek，唯一正确的确定性用法 ----------
   const cards = document.getElementById('cards');
@@ -114,10 +117,12 @@
     .to('.card', { y: -12, duration: 1.2, ease: 'sine.inOut', stagger: 0.1 }, 1.8)
     .to('.card', { y: 0, duration: 1.2, ease: 'sine.inOut', stagger: 0.1 }, 3.0);
 
-  tl.seek(Math.min(T, tl.duration()), false);   // ← 关键：只 seek，不让 GSAP 自己走时间
+  // ---------- 3. 注册到帧协议（截图器只会调 window.__seek(frame)） ----------
+  __registerTimeline('cards', tl);     // 有 .seek(秒) 的对象都能注册
+  __onSeek((frame, t) => drawBackdrop(frame, t));   // 自研 Canvas 画法直接用钩子
 
-  // ---------- 3. 通知截图器 ----------
-  window.__FRAME_READY__ = true;
+  // 首次渲染（直接打开文件时也能看到画面；截图器随后会自己 seek）
+  window.__seek(P.frame);
 })();
 </script>
 </body>

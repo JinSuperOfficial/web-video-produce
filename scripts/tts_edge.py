@@ -29,7 +29,16 @@ python scripts/tts_edge.py --text "欢迎来到本期节目。" --outdir public/
     vo.mp3            拼接后的整条音轨
     vo.srt / vo.vtt   与音轨对齐的整条字幕（时间含段间静音偏移）
     manifest.json     每段的 start/end/时长/帧号，供代码对轴
+    words.json        逐词时间戳（卡拉OK 高亮、音效卡点、逐词校对用）
     parts/*.mp3|.srt  每段中间产物（--force 可强制重生成）
+    parts/*.words.json 每段的词级时间戳（分段模式的中间产物）
+
+关于 words.json
+---------------
+只要引擎能给出词边界（edge-tts 的 WordBoundary），就会产出**逐词**时间戳，
+并且已经过停顿重整后的**最终时间轴**校正 —— 可以直接当卡拉OK 用。
+拿不到词边界时（自建 TTS API、或 --no-words）文件里 precision 会写 "none"，
+不会假装有词级精度。词条文本是"会被读出来的字"（已去标点），与稿件一一对应。
 
 脚本格式（JSON）
 ----------------
@@ -47,6 +56,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import bisect
 import json
 import os
 import random
@@ -84,6 +94,10 @@ LOUDNESS_PRESETS = {"social": -14.0, "podcast": -16.0, "broadcast": -23.0}
 SRT_TIME = re.compile(
     r"(\d{2}):(\d{2}):(\d{2})[,.](\d{3})\s*-->\s*(\d{2}):(\d{2}):(\d{2})[,.](\d{3})"
 )
+# 字幕分句用的标点：词级时间戳按这些标点聚成"一读"级别的字幕
+CLAUSE_PUNCT = "，,、；;：:!！?？"
+CLAUSE_RE = re.compile(rf"(?<=[{re.escape(CLAUSE_PUNCT)}])")
+TRIM_PUNCT = CLAUSE_PUNCT + "。． \t"
 
 
 # --------------------------------------------------------------------------- #
@@ -260,7 +274,159 @@ def norm_chars(text: str) -> str:
 
 
 # --------------------------------------------------------------------------- #
-# 自定义 TTS API（engine=openai / custom）—— "可以调用自己的 TTS API"
+# 词级时间戳：把 WordBoundary 词块变成可用的逐词时间轴
+# --------------------------------------------------------------------------- #
+@dataclass
+class Word:
+    """一个词块。
+
+    start/end 的含义取决于阶段：
+      · 刚解析出来时 = 音频时间轴上的绝对秒数（整段模式）或段内相对秒数（分段模式）；
+      · 经 remap_words 重整后 = **最终成品音轨**上的秒数，可以直接拿去对轴。
+    char_start/char_end 是它在"规范化全文"里的字符下标，用来把词聚成句、以及做完整性校验。
+    """
+    text: str
+    start: float
+    end: float
+    seg_index: int = 0
+    char_start: int = 0
+    char_end: int = 0
+
+
+def words_from_events(texts: list[str], events: list[dict]) -> list[Word] | None:
+    """把 WordBoundary 事件按顺序对回稿件文字，返回词列表；对不上就返回 None。
+
+    为什么要**逐词比对**而不是只比总字数：TTS 会把 "15" 读成 "十五"、把 "API" 读成
+    "A P I" —— 这类改写如果恰好总字数相同，只比总数就会静默错位，字幕从此飘掉。
+    所以每个词块都必须与稿件里对应位置的字**逐字相等**，否则宁可降级也不用错的时间轴。
+    """
+    targets = [norm_chars(t) for t in texts]
+    if any(not t for t in targets):
+        return None
+    full = "".join(targets)
+    # 每段在规范化全文里的 [起, 止) 区间
+    spans: list[tuple[int, int]] = []
+    acc = 0
+    for t in targets:
+        spans.append((acc, acc + len(t)))
+        acc += len(t)
+
+    words: list[Word] = []
+    pos = 0
+    for e in events:
+        w = norm_chars(str(e.get("text", "")))
+        if not w:
+            continue
+        s0, s1 = pos, pos + len(w)
+        if s1 > len(full) or full[s0:s1] != w:
+            warn(f"词块「{w}」与稿件第 {s0}–{s1} 字不一致（TTS 改写了文本？），放弃逐词对齐")
+            return None
+        pos = s1
+        off = float(e["offset"]) / 1e7
+        dur = float(e["duration"]) / 1e7
+        si = max(0, bisect.bisect_right([sp[0] for sp in spans], s0) - 1)
+        words.append(Word(text=w, start=off, end=off + dur,
+                          seg_index=si, char_start=s0, char_end=s1))
+    if pos != len(full):
+        warn(f"词块字符数 {pos} 与稿件 {len(full)} 不一致，放弃逐词对齐")
+        return None
+    if not words:
+        return None
+    return words
+
+
+def cues_from_words(text: str, words: list[Word]) -> list[tuple[float, float, str]]:
+    """把词级时间戳按标点聚成"一读"级别的字幕（比逐词字幕好读，又比整段精确）。"""
+    chunks: list[tuple[int, int, str]] = []
+    pos = 0
+    for part in CLAUSE_RE.split(text):
+        n = len(norm_chars(part))
+        if not n:
+            continue
+        label = part.strip().strip(TRIM_PUNCT).strip()
+        chunks.append((pos, pos + n, label or part.strip()))
+        pos += n
+    if not chunks:                      # 没有任何标点 → 整段一条字幕
+        return [(min(w.start for w in words), max(w.end for w in words), text.strip())]
+
+    cues: list[tuple[float, float, str]] = []
+    for a, b, label in chunks:
+        hit = [w for w in words if a <= w.char_start < b]
+        if not hit:
+            continue
+        cues.append((min(w.start for w in hit), max(w.end for w in hit), label))
+    return cues or [(min(w.start for w in words), max(w.end for w in words), text.strip())]
+
+
+def remap_time(t: float, cuts: list[float], cursors: list[float]) -> float:
+    """把"重整前"的时间映射到"插过停顿之后"的最终时间轴。
+
+    rebuild_with_pauses 是**分段平移**：第 i 个切片 [cuts[i], cuts[i+1]) 内的音频
+    原样保留，只是整片平移 cursors[i] - cuts[i]。所以逐词时间只要落在同一个切片里，
+    平移量就与它所属的那句话完全一致 —— 这是一个精确映射，不是估算。
+    """
+    i = bisect.bisect_right(cuts, t) - 1
+    i = min(max(i, 0), len(cursors) - 1)
+    return cursors[i] + (t - cuts[i])
+
+
+def remap_words(words: list[Word], cuts: list[float], cursors: list[float]) -> list[Word]:
+    """按分段平移把词级时间戳搬到最终时间轴上。"""
+    out: list[Word] = []
+    prev_end = 0.0
+    for w in sorted(words, key=lambda x: x.start):
+        st = remap_time(w.start, cuts, cursors)
+        en = remap_time(w.end, cuts, cursors)
+        st = max(st, prev_end)          # 保证单调，杜绝卡拉OK 高亮回跳
+        en = max(en, st + 0.01)
+        out.append(Word(text=w.text, start=st, end=en, seg_index=w.seg_index,
+                        char_start=w.char_start, char_end=w.char_end))
+        prev_end = en
+    return out
+
+
+def build_word_entries(words: list[Word], segments: list, fps: int) -> list[dict]:
+    """词列表 → words.json 的 words 数组（帧号一并算好，画面代码不用再乘 fps）。"""
+    entries: list[dict] = []
+    for w in words:
+        seg = segments[w.seg_index] if 0 <= w.seg_index < len(segments) else None
+        entries.append({
+            "text": w.text,
+            "start": round(w.start, 3),
+            "end": round(w.end, 3),
+            "duration": round(max(0.0, w.end - w.start), 3),
+            "start_frame": round(w.start * fps),
+            "duration_frames": max(1, round((w.end - w.start) * fps)),
+            "segment": seg.id if seg else None,
+            "segment_index": w.seg_index,
+        })
+    return entries
+
+
+def write_words(outdir: Path, words: list[Word], segments: list, fps: int,
+                audio_name: str, mode: str, total: float,
+                precision: str, note: str | None = None) -> Path:
+    """写 words.json：逐词时间戳。precision 如实标注能拿到什么精度。"""
+    payload = {
+        "fps": fps,
+        "audio": audio_name,
+        "mode": mode,
+        "precision": precision,          # "word" | "none"
+        "source": "edge-tts WordBoundary" if precision == "word" else "unavailable",
+        "total_duration": round(total, 3),
+        "total_frames": round(total * fps),
+        "word_count": len(words),
+        "words": build_word_entries(words, segments, fps),
+    }
+    if note:
+        payload["note"] = note
+    path = outdir / "words.json"
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return path
+
+
+# --------------------------------------------------------------------------- #
+# 自定义 TTS API（engine=openai / voicecraft / custom）—— "可以调用自己的 TTS API"
 # --------------------------------------------------------------------------- #
 def rate_to_speed(rate: str) -> float:
     """'+10%' -> 1.1 ，'-5%' -> 0.95 。"""
@@ -268,8 +434,26 @@ def rate_to_speed(rate: str) -> float:
     return 1.0 + (float(m.group(1)) / 100.0 if m else 0.0)
 
 
+def hz_to_number(value: str) -> str:
+    """'+10Hz' -> '10'；'0Hz' -> '0'。
+
+    VoiceCraft 系的接口把 pitch/volume 定义成 -50~50 的**数字**，而 edge-tts 用的是
+    '+10Hz' / '+20%' 这种带单位的字符串。这里做一次换算，让同一份脚本能换引擎跑。
+    """
+    m = re.fullmatch(r"\s*([+-]?\d+(?:\.\d+)?)\s*(?:Hz|hz|%)?\s*", value or "")
+    return str(int(round(float(m.group(1))))) if m else "0"
+
+
 def tts_http(args: argparse.Namespace, text: str) -> bytes:
-    """调用 OpenAI 兼容的 /audio/speech，或用户自定义的 TTS 端点，返回音频字节。"""
+    """调用 OpenAI 兼容的 /audio/speech、VoiceCraft 系接口，或用户自定义的 TTS 端点。
+
+    三条路都能接，差别只在请求体字段：
+      · openai     —— {model, input, voice, response_format, speed}，OpenAI / 多数云厂商
+      · voicecraft —— {input, voice, speed, pitch, style, volume}，wangwangit/tts 那一系的
+                      Cloudflare Worker（含自建与分叉版本，如 JinSuperOfficial/tts-voice-magic）；
+                      它没有 model 字段，多出 style（general/newscast/cheerful…）这个能力
+      · custom     —— 自己填 URL + JSON 模板，兜住剩下所有差异
+    """
     engine = getattr(args, "engine", "edge")
     key = (getattr(args, "tts_api_key", "") or os.environ.get("TTS_API_KEY")
            or os.environ.get("OPENAI_API_KEY") or "")
@@ -282,6 +466,21 @@ def tts_http(args: argparse.Namespace, text: str) -> bytes:
             "response_format": args.tts_format,
             "speed": round(rate_to_speed(args.rate), 3),
         }
+    elif engine == "voicecraft":
+        if not args.tts_base_url:
+            raise RuntimeError(
+                "engine=voicecraft 需要 --tts-base-url，例如 https://tts.jinsuper.cn/v1 "
+                "（自建见 https://github.com/JinSuperOfficial/tts-voice-magic）"
+            )
+        url = args.tts_base_url.rstrip("/") + "/audio/speech"
+        payload = {
+            "input": text,
+            "voice": args.voice,
+            "speed": round(rate_to_speed(args.rate), 3),
+            "pitch": hz_to_number(args.pitch),
+            "style": getattr(args, "tts_style", "") or "general",
+            "volume": hz_to_number(args.volume),
+        }
     else:  # custom：用户给完整 URL + JSON 模板，覆盖几乎所有厂商的差异
         if not args.tts_endpoint:
             raise RuntimeError("engine=custom 必须提供 --tts-endpoint")
@@ -293,7 +492,16 @@ def tts_http(args: argparse.Namespace, text: str) -> bytes:
                  .replace("{speed}", str(round(rate_to_speed(args.rate), 3)))
         payload = json.loads(raw)
 
-    headers = {"Content-Type": "application/json"}
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "*/*",
+        # 必须给一个正常的 User-Agent。实测：Cloudflare 前置的 TTS 服务
+        # （Workers 部署的那种）会拦掉 Python 默认的 "Python-urllib/3.x"，返回
+        # HTTP 403 + "error code: 1010"（bot 特征检查）。curl 能通、Python 不能通，
+        # 就是这个原因 —— 不是接口坏了，是 UA 被风控了。
+        # 任何非 Python-urllib 的 UA 都能过（实测自定义工具 UA 也返回 200）。
+        "User-Agent": "web-video-produce/1.2 (+https://github.com/JinSuperOfficial/dsh-web-video)",
+    }
     if key:
         headers["Authorization"] = f"Bearer {key}"
     for item in getattr(args, "tts_header", []) or []:
@@ -382,10 +590,15 @@ def finish_audio(args: argparse.Namespace, track: Path, audio_out: Path) -> None
 
 
 def rebuild_with_pauses(src: Path, segments: list, gap_ms: int, tail_ms: int,
-                        dst: Path) -> None:
+                        dst: Path) -> "tuple[list[float], list[float]]":
     """把整段合成的音频按段切开、段间插入真停顿、尾部留呼吸，并同步改写各段起止时间。
 
     切点取相邻两段之间的中点 —— 落在自然停顿里，不会切到字上。
+
+    返回 (cuts, cursors)：cuts[i]..cuts[i+1] 是第 i 段在**原音频**里的切片，
+    cursors[i] 是它在**新音频**里的起点。两者构成一个精确的分段平移映射，
+    逐词时间戳用 remap_time() 走同一个映射即可，不需要重新估算。
+    注意：分段平移**不改动切片内部的任何音频**，所以片内相对时间完全不失真。
     """
     n = len(segments)
     total = ffprobe_duration(src)
@@ -424,14 +637,17 @@ def rebuild_with_pauses(src: Path, segments: list, gap_ms: int, tail_ms: int,
             "-ar", str(AUDIO_RATE_OUT), "-ac", "2", str(dst)])
 
     cursor = 0.0
+    cursors: list[float] = []
     for i, seg in enumerate(segments):
         rel_start = seg.start - cuts[i]
         rel_end = seg.end - cuts[i]
+        cursors.append(cursor)
         seg.start = cursor + rel_start
         seg.end = cursor + rel_end
         seg.duration = seg.end - seg.start
         seg.cues = [(0.0, seg.duration, seg.text)]
         cursor += (cuts[i + 1] - cuts[i]) + (gap if i < n - 1 else tail)
+    return cuts, cursors
 
 
 # --------------------------------------------------------------------------- #
@@ -453,6 +669,7 @@ class Segment:
     end: float = 0.0
     part: Path | None = None
     cues: list[tuple[float, float, str]] = field(default_factory=list)
+    words: list[Word] = field(default_factory=list)   # 段内相对时间；拼接时再加段偏移
 
 
 def split_long_text(text: str, max_chars: int) -> list[str]:
@@ -533,46 +750,101 @@ async def synth_one(seg: Segment, parts_dir: Path, sem: asyncio.Semaphore,
                     force: bool, args: argparse.Namespace | None = None,
                     retries: int = 4) -> None:
     engine = getattr(args, "engine", "edge") if args else "edge"
+    want_words = bool(getattr(args, "words", True)) and engine == "edge"
     ext = "mp3" if engine == "edge" else (getattr(args, "tts_format", "mp3") or "mp3")
     audio_path = parts_dir / f"seg_{seg.index:03d}.{ext}"
     srt_path = parts_dir / f"seg_{seg.index:03d}.srt"
+    words_path = parts_dir / f"seg_{seg.index:03d}.words.json"
     seg.part = audio_path
+
+    def load_words() -> bool:
+        """读回词级时间戳缓存；返回是否拿到。"""
+        if not words_path.exists():
+            return False
+        try:
+            data = json.loads(words_path.read_text(encoding="utf-8"))
+            seg.words = [
+                Word(text=str(w["text"]), start=float(w["start"]), end=float(w["end"]),
+                     seg_index=0, char_start=int(w.get("char_start", 0)),
+                     char_end=int(w.get("char_end", 0)))
+                for w in data.get("words", [])
+            ]
+        except (KeyError, ValueError, json.JSONDecodeError) as exc:
+            warn(f"  ! [{seg.index:03d}] 词级缓存损坏（{exc}），将重新合成")
+            return False
+        return bool(seg.words)
+
+    # 缓存命中条件：音频 + 字幕都在，并且（想要词级时间戳时）词级缓存也在。
+    # 少了词级缓存就重合成 —— 宁可多一次请求，也不要交出"有音频没词表"的半成品。
     if audio_path.exists() and srt_path.exists() and not force:
-        seg.cues = parse_srt(srt_path.read_text(encoding="utf-8"))
-        seg.duration = ffprobe_duration(audio_path)
-        return
+        has_words = load_words() if want_words else True
+        if has_words:
+            seg.cues = parse_srt(srt_path.read_text(encoding="utf-8"))
+            seg.duration = ffprobe_duration(audio_path)
+            return
 
     async with sem:
         last: Exception | None = None
         for attempt in range(1, retries + 1):
             try:
                 if engine != "edge":
-                    # 自建 TTS API：一次请求 = 一段，时长由 ffprobe 回读，字幕按整段生成
+                    # 自建 / 第三方 TTS API：一次请求 = 一段，时长由 ffprobe 回读。
+                    # 这类接口拿不到词边界，所以 words.json 会如实标注 precision=none。
+                    #
+                    # 字幕**不能留空**：以前这里写空 SRT，结果是"配音有、字幕没有"的静默失败
+                    # （画面烧字幕时一片空白，还查不出原因）。现在按"一句一段"生成 ——
+                    # 每段的起止时间是从音频回读的真实时长，天然准确，正好是技能文档里
+                    # 给网页 TTS 路线推荐的做法：宁可粗粒度，也不要假精度。
                     data = await asyncio.to_thread(tts_http, args, seg.text)
                     audio_path.write_bytes(data)
-                    srt_path.write_text("", encoding="utf-8")
-                    seg.cues = []
                     seg.duration = ffprobe_duration(audio_path)
+                    seg.cues = [(0.0, seg.duration, seg.text)]
+                    write_srt(seg.cues, srt_path)
                     log(f"  ✓ [{seg.index:03d}] {seg.duration:6.2f}s  {seg.text[:26]}…  ({engine})")
                     return
+                # 显式要 WordBoundary：它比 SentenceBoundary 更细，既能自己聚成句级字幕，
+                # 又能顺带产出逐词时间戳。音频流与要哪种边界无关，不会改变音质。
                 communicate = edge_tts.Communicate(
                     seg.text, seg.voice,
                     rate=seg.rate, pitch=seg.pitch, volume=seg.volume,
+                    boundary="WordBoundary" if want_words else "SentenceBoundary",
                 )
+                events: list[dict] = []
                 submaker = edge_tts.SubMaker()
                 with open(audio_path, "wb") as fh:
                     async for chunk in communicate.stream():
                         if chunk["type"] == "audio":
                             fh.write(chunk["data"])
                         elif chunk["type"] in ("WordBoundary", "SentenceBoundary"):
+                            events.append(chunk)
                             submaker.feed(chunk)
-                srt_text = submaker.get_srt()
-                if isinstance(srt_text, list):  # 兼容旧版本返回 list
-                    srt_text = "\n".join(srt_text)
-                srt_path.write_text(srt_text or "", encoding="utf-8")
-                seg.cues = parse_srt(srt_text or "")
+                seg.words = (words_from_events([seg.text], events) or []) if want_words else []
+                if seg.words:
+                    seg.cues = cues_from_words(seg.text, seg.words)
+                    words_path.write_text(json.dumps({
+                        "text": seg.text,
+                        "chars": len(norm_chars(seg.text)),
+                        "words": [{"text": w.text, "start": round(w.start, 4),
+                                   "end": round(w.end, 4), "char_start": w.char_start,
+                                   "char_end": w.char_end} for w in seg.words],
+                    }, ensure_ascii=False, indent=2), encoding="utf-8")
+                    write_srt(seg.cues, srt_path)      # 句级字幕落盘；词级在 sidecar 里
+                elif want_words:
+                    # 要了词边界却没对上（TTS 改写文本）：不交出错的时间轴，
+                    # 整段一条字幕，并在日志里说清楚。
+                    seg.duration = ffprobe_duration(audio_path)
+                    warn(f"  ! [{seg.index:03d}] 词块对不上稿件，本段退化为整段一条字幕")
+                    seg.cues = [(0.0, seg.duration, seg.text)]
+                    write_srt(seg.cues, srt_path)
+                else:
+                    srt_text = submaker.get_srt()
+                    if isinstance(srt_text, list):   # 兼容旧版本返回 list
+                        srt_text = "\n".join(srt_text)
+                    srt_path.write_text(srt_text or "", encoding="utf-8")
+                    seg.cues = parse_srt(srt_text or "")
                 seg.duration = ffprobe_duration(audio_path)
-                log(f"  ✓ [{seg.index:03d}] {seg.duration:6.2f}s  {seg.text[:26]}…")
+                log(f"  ✓ [{seg.index:03d}] {seg.duration:6.2f}s  {seg.text[:26]}…"
+                    + (f"  ({len(seg.words)} 词)" if seg.words else ""))
                 return
             except Exception as exc:  # noqa: BLE001 - 网络抖动/限流统一重试
                 last = exc
@@ -625,9 +897,14 @@ async def run(args: argparse.Namespace) -> int:
     concat_list: list[Path] = []
     cues: list[tuple[float, float, str]] = []
     cursor = 0.0
-    for seg in segments:
+    all_words: list[Word] = []
+    for si, seg in enumerate(segments):
         seg.start = cursor
         seg.end = cursor + seg.duration
+        for w in seg.words:                      # 词级时间戳搬到全局时间轴
+            all_words.append(Word(text=w.text, start=seg.start + w.start,
+                                  end=seg.start + w.end, seg_index=si,
+                                  char_start=w.char_start, char_end=w.char_end))
         prev_end: float | None = None
         for (cs, ce, content) in seg.cues:
             cue_start = seg.start + cs
@@ -691,66 +968,56 @@ async def run(args: argparse.Namespace) -> int:
         json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
     )
 
-    log(f"完成 → {audio_out} ({manifest['total_duration']}s, "
-        f"{manifest['total_frames']} 帧 @{fps}fps)")
+    total = manifest["total_duration"]
+    words_path = write_words(
+        outdir, all_words, segments, fps, audio_out.name, "segment", total,
+        precision="word" if all_words else "none",
+        note=None if all_words else (
+            "分段模式下未拿到词边界（引擎不支持，或用了 --no-words）；"
+            "字幕仍与音频严格对齐，只是没有逐词精度"),
+    )
+
+    log(f"完成 → {audio_out} ({total}s, {manifest['total_frames']} 帧 @{fps}fps)")
     log(f"字幕 → {srt_out} / {vtt_out}   时间轴 → {outdir / 'manifest.json'}")
+    if all_words:
+        log(f"词级时间戳 → {words_path}（{len(all_words)} 词，可做卡拉OK 高亮）")
+    else:
+        log(f"词级时间戳 → {words_path}（precision=none：当前引擎/参数拿不到词边界）")
     return 0
 
 
 # --------------------------------------------------------------------------- #
 # 整段韵律模式（推荐）：一次请求合成全稿，韵律连续，最接近真人
 # --------------------------------------------------------------------------- #
-def map_boundaries(segments: list[Segment], events: list[dict]) -> bool:
-    """用 WordBoundary 词块把整段音频切回各脚本段。字符数对不上就返回 False（自动降级）。"""
-    targets = [norm_chars(s.text) for s in segments]
-    if any(not t for t in targets):
-        return False
-    cum, acc = [], 0
-    for t in targets:
-        acc += len(t)
-        cum.append(acc)
-    total_chars = acc
+def map_boundaries(segments: list[Segment], events: list[dict]) -> list[Word] | None:
+    """用 WordBoundary 词块把整段音频切回各脚本段，并返回词级时间戳。
 
-    starts: list[float | None] = [None] * len(segments)
-    ends: list[float | None] = [None] * len(segments)
-    pos = 0
-    for e in events:
-        t = norm_chars(str(e.get("text", "")))
-        if not t:
-            continue
-        s0, s1 = pos, pos + len(t)
-        pos = s1
-        off = float(e["offset"]) / 1e7
-        dur = float(e["duration"]) / 1e7
-        for i in range(len(segments)):
-            lo = 0 if i == 0 else cum[i - 1]
-            hi = cum[i]
-            if s0 < hi and s1 > lo:          # 该词块与第 i 段有交叠
-                if starts[i] is None:
-                    starts[i] = off
-                ends[i] = off + dur
+    返回 None 表示无法可靠对齐，调用方应退回分段模式（时间轴一定准，音质略降）。
+    """
+    words = words_from_events([s.text for s in segments], events)
+    if words is None:
+        return None
 
-    if pos != total_chars:
-        warn(f"词块字符数 {pos} 与脚本 {total_chars} 不一致，无法可靠对齐")
-        return False
-    if any(st is None or en is None for st, en in zip(starts, ends)):
-        warn("有片段没有匹配到词块（可能是纯符号或英文缩写被改写）")
-        return False
+    grouped: dict[int, list[Word]] = {}
+    for w in words:
+        grouped.setdefault(w.seg_index, []).append(w)
+    if any(i not in grouped for i in range(len(segments))):
+        warn("有片段没有匹配到词块（可能是纯符号段）")
+        return None
 
     prev_end = 0.0
     for i, seg in enumerate(segments):
-        st, en = starts[i], ends[i]
-        assert st is not None and en is not None
-        st = max(st, prev_end)                # 保证单调，杜绝字幕重叠
-        en = max(en, st + 0.12)
+        ws = sorted(grouped[i], key=lambda x: x.start)
+        st = max(ws[0].start, prev_end)       # 保证单调，杜绝字幕重叠
+        en = max(ws[-1].end, st + 0.12)
         if en - st > 60:
             warn(f"第 {i} 段映射时长异常（{en - st:.1f}s）")
-            return False
+            return None
         seg.start, seg.end = st, en
         seg.duration = en - st
         seg.cues = [(0.0, en - st, seg.text)]
         prev_end = en
-    return True
+    return words
 
 
 async def synth_whole(args: argparse.Namespace, segments: list[Segment],
@@ -783,7 +1050,8 @@ async def synth_whole(args: argparse.Namespace, segments: list[Segment],
     else:
         raise RuntimeError(f"整段合成失败: {last_exc}")
 
-    if not map_boundaries(segments, events):
+    words = map_boundaries(segments, events)
+    if words is None:
         warn("整段模式无法可靠对齐 → 自动退回分段模式（时间轴一定准，音质略降）")
         args.mode = "segment"
         return await run(args)
@@ -795,12 +1063,26 @@ async def synth_whole(args: argparse.Namespace, segments: list[Segment],
     bgm_on = bool((getattr(args, "bgm", "") or "").strip())
     tail = args.tail_ms if (bgm_on or args.tail_ms != DEFAULT_TAIL_MS) else 150
     log(f"按段插入停顿 {args.gap_ms}ms、片尾留白 {tail}ms …")
-    rebuild_with_pauses(raw, segments, args.gap_ms, tail, track)
+    cuts, cursors = rebuild_with_pauses(raw, segments, args.gap_ms, tail, track)
     finish_audio(args, track, audio_out)
 
-    cues: list[tuple[float, float, str]] = []
+    # 词级时间戳走与音频**同一个**分段平移映射，所以重整停顿之后依然精确
+    words = remap_words(words, cuts, cursors)
+
+    # 字幕：优先用词级时间戳按标点断句（字幕紧贴真实语音，不在静音里空等）
+    seg_char0: list[int] = []
+    acc_chars = 0
     for seg in segments:
-        cues.append((seg.start, seg.end, seg.text))
+        seg_char0.append(acc_chars)
+        acc_chars += len(norm_chars(seg.text))
+    cues: list[tuple[float, float, str]] = []
+    for i, seg in enumerate(segments):
+        local = [
+            Word(text=w.text, start=w.start, end=w.end, seg_index=i,
+                 char_start=w.char_start - seg_char0[i], char_end=w.char_end - seg_char0[i])
+            for w in words if w.seg_index == i
+        ]
+        cues.extend(cues_from_words(seg.text, local) if local else [(seg.start, seg.end, seg.text)])
 
     srt_out = outdir / f"{args.prefix}.srt"
     vtt_out = outdir / f"{args.prefix}.vtt"
@@ -827,10 +1109,13 @@ async def synth_whole(args: argparse.Namespace, segments: list[Segment],
     manifest["total_frames"] = round(total * fps)
     (outdir / "manifest.json").write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    words_path = write_words(outdir, words, segments, fps, audio_out.name, "whole", total,
+                             precision="word")
     for i, seg in enumerate(segments):
         log(f"  ✓ [{i:03d}] {seg.start:6.2f}s +{seg.duration:5.2f}s  {seg.text[:24]}…")
     log(f"完成 → {audio_out} ({manifest['total_duration']}s, {manifest['total_frames']} 帧 @{fps}fps)")
     log(f"字幕 → {srt_out} / {vtt_out}   时间轴 → {outdir / 'manifest.json'}")
+    log(f"词级时间戳 → {words_path}（{len(words)} 词，可做卡拉OK 高亮）")
     return 0
 
 
@@ -883,10 +1168,16 @@ def main() -> int:
                    help="响度目标预设：social=-14 / podcast=-16（默认）/ broadcast=-23 LUFS")
     p.add_argument("--mode", choices=["segment", "whole"], default="whole",
                    help="segment=逐段合成（时间轴最稳）；whole=整段一次合成（韵律最自然，默认）")
-    p.add_argument("--engine", choices=["edge", "openai", "custom"], default="edge",
-                   help="edge=内置 edge-tts（默认免费）；openai=OpenAI 兼容 /audio/speech；custom=自定义端点")
+    p.add_argument("--engine", choices=["edge", "openai", "voicecraft", "custom"], default="edge",
+                   help="edge=内置 edge-tts（默认免费，唯一能给逐词时间戳的）；"
+                        "openai=OpenAI 兼容 /audio/speech；"
+                        "voicecraft=VoiceCraft 系（wangwangit/tts 及自建分叉，多一个 style 情感参数）；"
+                        "custom=自定义端点")
     p.add_argument("--tts-base-url", default="https://api.openai.com/v1",
-                   help="engine=openai 时的 base url")
+                   help="engine=openai/voicecraft 时的 base url（voicecraft 例：https://tts.jinsuper.cn/v1）")
+    p.add_argument("--tts-style", default="",
+                   help="engine=voicecraft 的语音风格：general/assistant/chat/customerservice/"
+                        "newscast/affectionate/calm/cheerful/gentle/lyrical/serious")
     p.add_argument("--tts-endpoint", default="", help="engine=custom 时的完整 URL")
     p.add_argument("--tts-api-key", default="",
                    help="API Key；留空则读环境变量 TTS_API_KEY / OPENAI_API_KEY")
@@ -898,6 +1189,10 @@ def main() -> int:
                    help='engine=custom 的 JSON 模板，支持 {text} {voice} {model} {speed}')
     p.add_argument("--keep-punct", action="store_true",
                    help="保留句号（默认按技能约束移除，句号会让听感变成机器念课文）")
+    p.add_argument("--words", dest="words", action="store_true", default=True,
+                   help="收集逐词时间戳写 words.json（默认开；用于卡拉OK 高亮与音效卡点）")
+    p.add_argument("--no-words", dest="words", action="store_false",
+                   help="不要词级时间戳（退回旧的句级字幕行为，少存一个文件）")
     p.add_argument("--max-chars", type=int, default=260, help="单次请求最大字符数（默认 260）")
     p.add_argument("--concurrency", type=int, default=4, help="并发数（默认 4，过高易被限流）")
     p.add_argument("--fps", type=int, default=30, help="用于生成帧号的帧率（默认 30）")

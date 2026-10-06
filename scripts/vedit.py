@@ -49,6 +49,33 @@ PREFERRED_TRANSITIONS = [
     "pixelize", "distance", "fadeblack", "fadewhite",
 ]
 
+# --------------------------------------------------------------------------- #
+# 转场层：语义转场预设
+#
+# ffmpeg 有 58 种 xfade，但"该用哪种"其实只有几种意图。EDL 里写风格名（soft/dip/push…）
+# 比写 ffmpeg 内部名（dissolve/fadeblack/slideleft…）更好维护：
+#   · 意图稳定，底层实现可以换（想让 soft 更黏更慢，改一处即可）；
+#   · 默认时长按意图给好了，不用每次试数字；
+#   · 和 Remotion 侧的 src/transitions 用同一套词汇，两条路线手感一致。
+# 想直接用 ffmpeg 原生名也完全可以："type": "wipeleft" 照样认。
+# --------------------------------------------------------------------------- #
+TRANSITION_STYLES = {
+    "hard":   {"type": None,          "duration": 0.0,  "desc": "硬切：明确不要转场（同场景内切换）"},
+    "soft":   {"type": "dissolve",    "duration": 0.8,  "desc": "柔和溶解：最通用的段落切换"},
+    "dip":    {"type": "fadeblack",   "duration": 0.6,  "desc": "黑场过渡：章节/时间跳跃"},
+    "flash":  {"type": "fadewhite",   "duration": 0.35, "desc": "白闪：能量突变，配 impact 音效卡点"},
+    "push":   {"type": "slideleft",   "duration": 0.5,  "desc": "横向推挤：同类内容前后对比"},
+    "pushv":  {"type": "slideup",     "duration": 0.5,  "desc": "竖向推挤：竖屏比横向自然"},
+    "wipe":   {"type": "wipeleft",    "duration": 0.5,  "desc": "擦除：干净利落的信息切换"},
+    "smooth": {"type": "smoothleft",  "duration": 0.6,  "desc": "柔和擦除：比 wipe 更黏、更慢"},
+    "diag":   {"type": "diagbr",      "duration": 0.5,  "desc": "斜向擦除：更有动势"},
+    "circle": {"type": "circleopen",  "duration": 0.6,  "desc": "圆形展开：活泼、强调"},
+    "zoom":   {"type": "zoomin",      "duration": 0.5,  "desc": "变焦冲击：推向高潮"},
+    "pixel":  {"type": "pixelize",    "duration": 0.5,  "desc": "像素化：科技感、故障风"},
+    "blur":   {"type": "hblur",       "duration": 0.5,  "desc": "模糊过渡：梦幻、回忆"},
+    "reveal": {"type": "revealright", "duration": 0.5,  "desc": "揭示：后一段从边缘长出来"},
+}
+
 def sub_style(height: int) -> str:
     """烧字幕样式：字号随画面高度缩放（竖屏 1080x1920 用 22 会太小）。"""
     size = max(20, round(height / 48))
@@ -393,16 +420,36 @@ def requested_part(seg: dict, idx: int) -> dict:
 
 
 def normalize_transition(raw, allow: set):
+    """把 EDL 里的转场写法规整成 {"type": xfade 名, "duration": 秒}。
+
+    支持三种写法（越靠前越推荐）：
+        {"style": "soft", "duration": 0.8}   # 语义风格 + 可选覆盖时长
+        "soft"                                # 只要风格，用默认时长
+        "wipeleft" / {"type": "wipeleft"}     # 直接用 ffmpeg 的 xfade 名
+    "hard" 风格返回 None = 这一段明确不要转场（宁可硬切，也别偷偷加一个）。
+    """
     if not raw:
         return None
     if isinstance(raw, str):
-        raw = {"type": raw}
-    ttype = str(raw.get("type", "fade")).strip()
-    dur = float(raw.get("duration", 0.5))
+        raw = {"style": raw} if raw in TRANSITION_STYLES else {"type": raw}
+    style = raw.get("style")
+    if style:
+        if style not in TRANSITION_STYLES:
+            die(f"不认识的转场风格 '{style}'。可用风格：{', '.join(sorted(TRANSITION_STYLES))}"
+                f"（也可以直接用 ffmpeg 的 xfade 名，跑 `vedit.py transitions` 看全部）")
+        preset = TRANSITION_STYLES[style]
+        if preset["type"] is None:
+            return None
+        ttype = str(raw.get("type") or preset["type"]).strip()
+        dur = float(raw.get("duration", preset["duration"]))
+    else:
+        ttype = str(raw.get("type", "fade")).strip()
+        dur = float(raw.get("duration", 0.5))
     if dur <= 0:
         die(f"转场时长必须 > 0（收到 {dur}）")
     if ttype not in allow:
-        die(f"不支持的转场 '{ttype}'。可用：{', '.join(sorted(allow))}")
+        die(f"本机 ffmpeg 没有转场 '{ttype}'。风格名：{', '.join(sorted(TRANSITION_STYLES))}；"
+            f"本机可用的原生名：{', '.join(sorted(allow))}")
     return {"type": ttype, "duration": dur}
 
 
@@ -666,6 +713,30 @@ def cmd_probe(args) -> int:
     return 0
 
 
+def cmd_transitions(args) -> int:
+    """列出语义转场风格与本机 ffmpeg 实际支持的 xfade 名。"""
+    allow = available_transitions()
+    print("■ 语义转场风格（EDL 里写 style，默认时长可被 duration 覆盖）\n")
+    print(f"  {'风格':<8}{'→ xfade':<14}{'默认':>6}  说明")
+    print("  " + "-" * 74)
+    for name, cfg in TRANSITION_STYLES.items():
+        native = cfg["type"] or "（无）"
+        mark = " " if (cfg["type"] is None or cfg["type"] in allow) else "✗"
+        print(f" {mark}{name:<8}{native:<14}{cfg['duration']:>5.2f}s  {cfg['desc']}")
+    print(f"\n■ 本机 ffmpeg 原生可用（{len(allow)} 种，EDL 里可直接写 \"type\": \"<名字>\"）\n")
+    names = sorted(allow)
+    for i in range(0, len(names), 6):
+        print("  " + "  ".join(f"{n:<14}" for n in names[i:i + 6]))
+    missing = [c["type"] for c in TRANSITION_STYLES.values()
+               if c["type"] and c["type"] not in allow]
+    print()
+    if missing:
+        warn(f"本机缺少这些风格依赖的转场：{', '.join(missing)}（用别的风格，或升级 ffmpeg）")
+    else:
+        log("所有语义风格在本机都可用。")
+    return 0
+
+
 def cmd_conform(args) -> int:
     dst = Path(args.out)
     dst.parent.mkdir(parents=True, exist_ok=True)
@@ -859,6 +930,9 @@ def main() -> int:
     sp = sub.add_parser("probe", help="读取素材元数据（时长/分辨率/帧率/音轨/HDR）")
     sp.add_argument("files", nargs="+")
     sp.set_defaults(func=cmd_probe)
+
+    st = sub.add_parser("transitions", help="列出语义转场风格 + 本机可用的 xfade 名")
+    st.set_defaults(func=cmd_transitions)
 
     sc = sub.add_parser("conform", help="把单个素材标准化为统一规格")
     sc.add_argument("--in", dest="input", required=True)

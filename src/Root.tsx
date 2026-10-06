@@ -2,6 +2,7 @@ import React from 'react';
 import { AbsoluteFill, Composition, Still } from 'remotion';
 import { Main } from './Main';
 import { Cover } from './Cover';
+import { ShowcaseScene } from './scenes/ShowcaseScene';
 import { FPS, HEIGHT, TAIL_FRAMES, WIDTH } from './config';
 import { voice } from './voice';
 
@@ -23,6 +24,15 @@ export const RemotionRoot: React.FC = () => {
         height={HEIGHT}
       />
       <Still id="Cover" component={Cover} width={WIDTH} height={HEIGHT} />
+      <Composition
+        id="MotionShowcase"
+        component={ShowcaseScene}
+        durationInFrames={660}
+        fps={FPS}
+        width={WIDTH}
+        height={HEIGHT}
+        defaultProps={{ durationInFrames: 660 }}
+      />
     </>
   );
 };

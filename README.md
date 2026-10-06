@@ -60,27 +60,32 @@
 git clone https://github.com/JinSuperOfficial/dsh-web-video.git
 cd dsh-web-video
 
-# 1) 环境自检（会告诉你缺什么、怎么装）
-bash scripts/check_env.sh
+# 1) 环境自检 + 工程校验 + 成片规格（一条命令问清楚）
+python3 scripts/wvp.py doctor
 
 # 2) 依赖
 npm install                     # 或 pnpm install
 npx remotion browser ensure     # 下载渲染用 Chrome Headless Shell（约 92MB，只下一次）
 python3 -m venv .venv && .venv/bin/pip install edge-tts
 
-# 3) 生成一条 10 秒片（示例）
-npm run assets                  # 生成 demo 素材（剪辑用）
-.venv/bin/python scripts/tts_edge.py \
-  --script examples/script.intro10s.json \
-  --outdir public/voice --voice zh-CN-XiaoxiaoNeural --rate +5% --fps 30 --normalize
+# 3) 出片：配音 → 时间轴校验 → 静态校验 → 渲染 → 补音轨 → 验收
+python3 scripts/wvp.py render --out output/intro10s.mp4
+#    先出 2 秒半分辨率样片更省时间：--scale 0.5 --frames 0-60
+#    复用已有配音：--no-tts
 
-npm run render                  # → output/video_silent.mp4
-npm run studio                  # 或者打开可视化预览调参
+# 4) 检查时间轴：段/帧/词对不对齐（--verify-audio 会解码音轨实测）
+python3 scripts/wvp.py timeline --words
+python3 scripts/wvp.py timeline --verify-audio
 
-# 4) 只看时间轴（剪辑路线）
-npm run edit:plan               # dry-run，打印将执行的 ffmpeg 命令
-npm run edit                    # 真正执行
+# 5) 剪辑路线：先看命令，再动手
+python3 scripts/vedit.py transitions                        # 不知道用哪种转场时
+python3 scripts/vedit.py plan  --edl examples/edit-plan.example.json
+python3 scripts/vedit.py build --edl examples/edit-plan.example.json
 ```
+
+`wvp.py` 是本项目的统一入口，只有三个子命令（`doctor` / `render` / `timeline`）——
+不用再记 `check_env.sh`、`validate.py`、`tts_edge.py`、`remotion render`、`mux.sh`、`ffprobe`
+这一串工具的调用顺序。
 
 **环境要求**：Node ≥ 18、Python ≥ 3.9、FFmpeg ≥ 6（需要 `libx264` / `aac` / `libass`）。Windows / macOS / Linux 均可。
 
@@ -89,20 +94,22 @@ npm run edit                    # 真正执行
 ![pipeline](docs/images/pipeline.jpg)
 
 ```
-文本 → 分段脚本(JSON) → edge-tts 配音 + 字幕 + 帧号时间轴
+文本 → 分段脚本(JSON) → edge-tts 配音 + 字幕 + 帧号时间轴 + 逐词时间戳
                               ↓
                     Remotion / React / Three.js / Canvas 写画面
+                    （motion 动作库 + transitions 转场层 + SFX 音效轨）
                               ↓
                     逐帧渲染 → FFmpeg 合成 → MP4
 ```
 
-配音这一步会产出三样东西，它们是一切的锚点：
+配音这一步会产出四样东西，它们是一切的锚点：
 
 | 产物 | 用途 |
 | --- | --- |
 | `vo.mp3` | 整条配音轨（含段间停顿与背景配乐） |
-| `vo.srt` / `vo.vtt` | 与音轨严格对齐的字幕 |
+| `vo.srt` / `vo.vtt` | 与音轨严格对齐的字幕（按标点断句，紧贴真实语音） |
 | `manifest.json` | **每句台词的起止帧号** —— 画面代码只认它，不认"大概几秒" |
+| `words.json` | **逐词时间戳** —— 卡拉OK 高亮、音效卡点、逐词校对 |
 
 ## 技术栈
 
@@ -183,7 +190,28 @@ export TTS_API_KEY=sk-xxxx        # 或 --tts-api-key
   --bgm assets/bgm.mp3
 ```
 
-**B. 完全自定义端点**（各家字段不一样时，用 JSON 模板适配）
+**B. VoiceCraft 系接口**（`POST /v1/audio/speech`，字段 `input` / `voice` / `speed` / `pitch` / `style` / `volume`）
+
+这个形状来自开源项目 [JinSuperOfficial/tts-voice-magic](https://github.com/JinSuperOfficial/tts-voice-magic)
+（VoiceCraft，基于微软 Edge TTS，可一键部署到 Cloudflare Workers）。它比 A 多一个 `style`
+情感/角色参数（`general` / `newscast` / `cheerful` / `serious` / `gentle` …）。
+
+```bash
+# 自己部署一份（推荐）：https://github.com/JinSuperOfficial/tts-voice-magic
+# 或直接用已经部署好的实例（本机实测可用）
+.venv/bin/python scripts/tts_edge.py --script examples/script.intro10s.json \
+  --outdir public/voice --fps 30 \
+  --engine voicecraft \
+  --tts-base-url https://tts.jinsuper.cn/v1 \
+  --voice zh-CN-XiaoxiaoNeural \
+  --rate +5% --tts-style newscast
+```
+
+> ⚠️ 一个实测踩到的坑：Cloudflare 前置的站点会拦掉 Python 默认的 User-Agent
+> （`Python-urllib/3.x` → `HTTP 403 error code: 1010`），而 `curl` 是通的。
+> 脚本已默认带正常 UA，所以开箱可用；换别的 HTTP 客户端时要自己设 UA。
+
+**C. 完全自定义端点**（各家字段不一样时，用 JSON 模板适配）
 
 ```bash
 .venv/bin/python scripts/tts_edge.py --script script.json --outdir public/voice \
@@ -196,7 +224,8 @@ export TTS_API_KEY=sk-xxxx        # 或 --tts-api-key
 
 模板里可用 `{text}` `{voice}` `{model}` `{speed}` 占位符；响应体直接是音频字节即可。
 
-> 自建引擎拿不到逐词边界，因此会自动改用分段模式（每段一次请求）—— 时间轴由 `ffprobe` 回读，依然精确。
+> 自建引擎拿不到逐词边界，因此会自动改用分段模式（每段一次请求）—— 时间轴由 `ffprobe` 回读，依然精确；
+> 字幕按"一句一段"生成，`words.json` 如实标注 `precision: "none"`，不假装有逐词精度。
 
 ## 剪辑模式（EDL 驱动）
 

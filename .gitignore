@@ -12,6 +12,9 @@ frames/
 # 生成物（可随时重跑出来，不进仓库）
 output/
 public/voice/
+# public/sfx 是 assets/sfx 的同步副本（wvp.py render 会自动同步），只保留 assets/ 里的正本
+public/sfx/
+public/fonts/
 
 # demo 大素材（用 scripts/make_sample_assets.sh 重新生成）
 assets/sample/*.mp4
