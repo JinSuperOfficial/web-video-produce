@@ -365,10 +365,15 @@ export const TransitionOverlay: React.FC<{
     }
 
     case 'zoomPunch': {
-      // 遮挡 = 色块急速拉近盖满 → 再继续放大冲过镜头并淡出；峰值附近加一层白闪。
+      // 遮挡 = 色块急速拉近盖满 → 再继续放大冲过镜头并淡出；峰值那一帧加一道白闪。
       const alpha = coverTri(u);
       const scale = u <= 0.5 ? 1.5 - 1.0 * (u / 0.5) : 1 + 1.1 * ((u - 0.5) / 0.5);
-      const flash = Math.sin(Math.PI * clamp01((u - 0.32) / 0.36));
+      // 白闪必须是"一下"，不是"一层灰幕"。
+      // 踩过的坑：最初窗口取 u∈[0.32,0.68] 且不透明度 0.5*sin(...)，14 帧的转场里有 5 帧
+      // 叠加了半透明白 —— 实测切点整屏 RGB 均值从背景的 #080b14 变成 #7b7c83（中灰），
+      // 连续 3~5 帧。那看起来不像"闪"，像渲染坏了（抽帧一眼就能看出是块灰板）。
+      // 现在窗口收窄到 u∈[0.43,0.57]（14 帧转场里只有 1~2 帧），配平方收敛 → 尖而短。
+      const flash = Math.pow(clamp01(1 - Math.abs(u - 0.5) / 0.07), 2);
       return (
         <AbsoluteFill
           style={{
@@ -379,7 +384,7 @@ export const TransitionOverlay: React.FC<{
             transformOrigin: 'center center',
           }}
         >
-          <AbsoluteFill style={{ backgroundColor: '#ffffff', opacity: 0.5 * flash }} />
+          <AbsoluteFill style={{ backgroundColor: '#ffffff', opacity: 0.7 * flash }} />
         </AbsoluteFill>
       );
     }
