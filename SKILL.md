@@ -10,6 +10,7 @@ metadata:
     voice: scripts/tts_edge.py
     audition: scripts/tts_audition.py
     bgm: scripts/make_bgm.py
+    validate: scripts/validate.py
     project: src/index.ts
     edit: scripts/vedit.py
     mux: scripts/mux.sh
@@ -52,6 +53,8 @@ metadata:
 3. **先样片后全片。** 先渲 1 张静帧（`remotion still`）确认字体/构图/颜色，再渲 3 秒，最后才渲全片。渲染是最贵的一步。剪辑同理：先 `vedit.py plan` 看命令，再 `build`。
 4. **音频用现成工具，画面用代码。** 不要用代码合成 TTS；不要用代码做混音。配音交给 edge-tts，编码与混音交给 FFmpeg。
 5. **交付即验证。** 出片后必须用 `ffprobe` 报告时长/分辨率/编码，用抽帧图确认画面与字幕，再把路径给用户。
+   渲染前后各跑一次 `python3 scripts/validate.py --out output/xxx.mp4`：一次性查确定性铁律、时间轴一致性、场景 id、素材引用、字体、成片规格与响度，有错直接非零退出。
+   另：**H.264 必须显式设 bt709**（`Config.setColorSpace('bt709')` 或 `--color-space=bt709`）。不设的话 Remotion 不传 `-color_range/-colorspace`，ffmpeg 会写成 full-range `yuvj420p` + BT.601，平台转码时颜色会漂。
 6. **异构素材必须先 conform，再进滤镜图。** 分辨率/帧率/编码/采样率/音轨数不一致的素材直接拼 = 黑帧、爆音、时长错乱。**剪辑四条硬约束（不可协商）**：
    - **① 标准化预处理**：拼接前一律先转码统一为同一分辨率 + 帧率 + 编码（H.264/yuv420p）+ 48kHz 立体声；无音轨的素材补静音轨。
    - **② 转场安全区**：只用 xfade 常见转场（fade/dissolve/wipeleft/wiperight/wipeup/wipedown/slide*/circle*），且 **offset 必须 = 前段累计时长 − 转场时长**；`转场时长 ≤ min(前段,后段)/2`，越界直接报错而不是硬拼。
@@ -65,7 +68,10 @@ metadata:
 - **语速 +0% ~ +5%**：超过 +10% 会明显发飘、失真。想要真人感先降速，别加特效。
 - **别用引号、括号、书名号包中文**：TTS 会把它们读出来或造成怪停顿。
 - **段间必须有停顿，不允许无缝衔接**：`--gap-ms` 默认 400ms（工具会在句间中点切开、插入真静音），片尾另留 `--tail-ms`（默认 600ms）给音乐收尾。连续念白听着难受，是交付事故。
-- **默认加背景配乐**：`--bgm` 默认 `assets/bgm.mp3`（仓库自带、代码合成、可商用），混音时做**侧链闪避**（人声一说话音乐自动压低），片头 1.2s 淡入、片尾 1.5s 淡出。文件不存在会自动跳过并提示；确需静音用 `--no-bgm`。
+- **默认加背景配乐**：`--bgm` 默认 `assets/bgm.mp3`（仓库自带、代码合成、可商用）。
+  混音用**多频段 carve**而不是整体压低：先 Linkwitz-Riley 分频（300Hz / 3400Hz），只对人声频段做侧链压限，音乐的低频与空气感全部保留。实测同一条片子的低频能量：不处理 -35.4dB / 整体闪避 -43.2dB（音乐瘪掉）/ carve -36.1dB。
+  片头 1.2s 淡入、片尾 1.5s 淡出；BGM 不存在会自动跳过；`--no-bgm` 整条不要音乐，`--no-carve` 退回整体压低。
+- **响度用两遍 loudnorm**：第一遍只测量拿到 `measured_*`，第二遍以 `linear=true` 做线性增益（单遍动态模式会二次改变音色与段间关系）。`--loudness-target social|podcast|broadcast` = -14 / -16 / -23 LUFS。
 
 ---
 
@@ -211,14 +217,14 @@ npx remotion still src/index.ts WebVideo output/f_120.png --frame=120   # 指定
 ```bash
 # 有声成片（<Audio> 已在 Main.tsx 里）
 npx remotion render src/index.ts WebVideo output/final.mp4 \
-  --codec=h264 --crf=18 --pixel-format=yuv420p --concurrency=4
+  --codec=h264 --crf=18 --pixel-format=yuv420p --color-space=bt709 --concurrency=4
 
 # 先出无字幕底片，再用 FFmpeg 混 BGM / 烧字幕
 npx remotion render src/index.ts WebVideo output/video_silent.mp4 \
-  --codec=h264 --crf=18 --pixel-format=yuv420p --muted
+  --codec=h264 --crf=18 --pixel-format=yuv420p --color-space=bt709 --muted
 ```
 
-常用参数：`--frames=0-120`（只渲一段，调试用）、`--scale=0.5`（半分辨率快速预览）、`--concurrency=1`（WebGL 场景卡顿时）、`--gl=angle`（Three.js 必须）、`--log=verbose`。
+常用参数：`--frames=0-120`（只渲一段，调试用）、`--scale=0.5`（半分辨率快速预览）、`--concurrency=1`（WebGL 场景卡顿时）、`--gl=angle`（Three.js 必须）、`--color-space=bt709`（必加）、`--log=verbose`。
 
 ### Step 6 · 合成封装
 
@@ -955,6 +961,7 @@ project/
 │   ├─ tts_edge.py           # 批量配音 + SRT/VTT + manifest.json（帧号时间轴）
 │   ├─ tts_audition.py       # ★ 同句多音色对照试听，选声音别再盲选
 │   ├─ make_bgm.py           # ★ 代码合成免版权背景配乐（可商用、可无缝循环）
+│   ├─ validate.py           # ★ 静态校验器：确定性/时间轴/素材/字体/成片规格与响度
 │   ├─ vedit.py              # ★ 剪辑器：probe / plan / build / conform（EDL → MP4）
 │   ├─ mux.sh                # 混流/混音/烧字幕/响度归一
 │   ├─ frames_to_video.sh    # PNG 序列 → MP4
@@ -1011,6 +1018,8 @@ cd my-video && npm install && npx remotion browser ensure && bash scripts/check_
 | **配音听起来很假/像念课文** | 句号带来的句末降调 | 去掉所有「。」（技能已默认强制）；断句改用逗号 |
 | **配音一顿一顿、句子之间空很久** | 分段合成：每个请求自带约 0.6s 尾静音，且语调在段首重置 | 用 `--mode whole`（默认）整段一次合成；同稿 8.75s → 6.98s |
 | **配音发飘、齿音重** | 语速太快 | `--rate` 压到 +0% ~ +5% |
+| **上传后颜色发灰/偏色** | 成片是 full-range `yuvj420p` + BT.601 | 渲染加 `--color-space=bt709`；`validate.py --out` 会直接报出来 |
+| **音乐在人声下「瘪掉」** | 用了整体侧链闪避 | 默认已是多频段 carve（只挖 300–3400Hz）；别手动加 `--no-carve` |
 | **BGM 盖过人声 / 忽大忽小** | 没做闪避或音量过高 | 默认已开 `sidechaincompress` 闪避；再不行调 `--bgm-gain-db -26` |
 | **BGM 结尾被硬切** | 没有留收尾空间 | 保持 `--tail-ms` ≥ 600（默认），混音会做 1.5s 淡出 |
 | **自建 TTS 报 401/403** | 鉴权头不对 | 用 `--tts-header "Authorization=Bearer xxx"` 显式覆盖 |
@@ -1069,7 +1078,8 @@ cd my-video && npm install && npx remotion browser ensure && bash scripts/check_
 - [ ] 静帧自检通过（中文不是豆腐块、无裁切、对比度足够）
 - [ ] 画面无随机/真实时间依赖（grep `Math.random`、`Date.now`、`performance.now`）
 - [ ] 全片渲染完成，`output/final.mp4` 存在
-- [ ] `ffprobe` 报告的时长/分辨率/帧率/编码符合预期
+- [ ] `python3 scripts/validate.py --out <成片>` 通过（0 错误）
+- [ ] `ffprobe` 报告的时长/分辨率/帧率/编码符合预期，且 `color_space=bt709`、`color_range=tv`
 - [ ] 抽 2–3 帧用图像能力核对过画面与字幕
 - [ ] 音量正常（无爆音、无忽大忽小），BGM 未盖过人声
 - [ ] 已向用户报告：路径、规格、音色、字幕状态、任何降级说明

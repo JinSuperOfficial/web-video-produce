@@ -7,7 +7,7 @@
     "check": "bash scripts/check_env.sh",
     "tts": "python3 scripts/tts_edge.py --script examples/script.intro10s.json --outdir public/voice --voice zh-CN-XiaoxiaoNeural --rate +5% --fps 30 --normalize",
     "studio": "remotion studio src/index.ts",
-    "render": "remotion render src/index.ts WebVideo output/video_silent.mp4 --codec=h264 --crf=18 --pixel-format=yuv420p",
+    "render": "remotion render src/index.ts WebVideo output/video_silent.mp4 --codec=h264 --crf=18 --pixel-format=yuv420p --color-space=bt709",
     "mux": "bash scripts/mux.sh --video output/video_silent.mp4 --audio public/voice/vo.mp3 --out output/final.mp4",
     "edit:plan": "python3 scripts/vedit.py plan --edl examples/edit-plan.example.json",
     "edit": "python3 scripts/vedit.py build --edl examples/edit-plan.example.json",

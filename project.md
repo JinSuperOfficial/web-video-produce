@@ -67,6 +67,7 @@ npm run edit:plan && npm run edit                 # 剪辑 demo → output/edit.
 | `scripts/tts_edge.py` | 配音管线：分段 → 合成 → 停顿重组 → BGM → 响度归一 → 字幕/manifest | 换 TTS 引擎、改停顿/配乐策略 |
 | `scripts/tts_audition.py` | 同句多音色对照试听 | 几乎不用改 |
 | `scripts/make_bgm.py` | 代码合成免版权垫乐 | 想换和弦进行/时长 |
+| `scripts/validate.py` | **静态校验器**：确定性/时间轴/场景 id/素材/字体/成片规格与响度 | 新增了不变量就往里加一条 |
 | `scripts/vedit.py` | EDL 剪辑器（probe/plan/build/conform） | 加转场类型、加叠加能力、改降级策略 |
 | `scripts/mux.sh` | 给**已有成片**做混流/混音/烧字幕/归一 | 一次性封装需求 |
 | `scripts/capture_frames.mjs` | HTML 路线的确定性逐帧截图 | 很少改 |
@@ -132,6 +133,10 @@ npm run edit:plan && npm run edit                 # 剪辑 demo → output/edit.
 | 四级降级 + 明确日志 | 剪辑不可逆，用户有权知道"这条没有转场" |
 | 配音默认整段一次请求 | 分段合成每段自带 ~0.6s 尾静音且语调重置，是"配音假"的主因 |
 | BGM 用代码合成 | 免版权、可商用、体积可控、可无缝循环 |
+| BGM 用**多频段 carve** 而非整体闪避 | 整体压低会让音乐在整个旁白期间"瘪掉"；只挖人声频段（300–3400Hz）则人声清楚、音乐还是音乐。实测低频能量：整体闪避 -43.2dB vs carve -36.1dB（不处理 -35.4dB） |
+| 响度用**两遍 loudnorm**（linear=true） | 单遍动态模式会二次改变音色与段间关系；两遍法只做线性增益 |
+| H.264 显式 `bt709` + `color_range tv` | 不设时 Remotion 不传色彩参数，ffmpeg 默认写成 full-range `yuvj420p` + BT.601，平台转码会漂色 |
+| 校验器在渲染**前**跑 | 把"渲完 10 分钟才发现 fps 不一致"提前到 1 秒内报出来 |
 | `vedit.py` 零第三方依赖 | 交接成本最低；只用 python3 标准库 + ffmpeg |
 
 ---
@@ -145,7 +150,9 @@ npm run edit:plan && npm run edit                 # 剪辑 demo → output/edit.
 5. **降级必须可见** —— 任何 fallback 都要 `warn()` 并在交付信息里标注。
 6. **口播稿不写句号** —— `tts_edge.py` 默认剔除；这是听感问题，不是排版洁癖。
 7. **不修改用户原始素材** —— 中间产物一律写 `work/`，交付物写 `output/`。
-8. **渲染确定性** —— 禁止 `Math.random()` / `Date.now()` / `performance.now()`（grep 可查）。
+8. **渲染确定性** —— 禁止 `Math.random()` / `Date.now()` / `performance.now()`（`validate.py` 会扫，注释里的示例不算）。
+9. **成片色彩空间必须是 `bt709` + `color_range=tv`** —— 见 §6 决策表；`validate.py --out` 会卡这一条。
+10. **第三方参考材料不进仓库、不抄内容** —— 见 §13。
 
 ---
 
@@ -178,6 +185,19 @@ npm run edit:plan && npm run edit                 # 剪辑 demo → output/edit.
 
 ---
 
+## 8b. 第三方参考材料政策
+
+`ref/` 目录（若存在）是**本地只读参考**，可能受 Apache-2.0 等许可约束：
+
+- 已在 `.gitignore` 中排除（`ref/`、`ref.tmp/`），**永不提交、永不上传**；push 前会物理删除。
+- 只借鉴**思路与做法**（例如"渲染前加静态校验门""多频段压限""两遍响度归一"这类通用工程实践），
+  **不复制任何文件、代码、文案、配色表或转场清单**。
+- 本仓库所有实现均为自研：`validate.py` 的检查项来自本项目自己的不变量；`mix_bgm()` 的
+  `acrossover` 分频图、`normalize_loudness()` 的两遍法是通用音频工程做法，代码自行编写。
+- 若将来要引入任何第三方代码/素材，必须单独确认许可并在 `LICENSE`/`NOTICE` 里合规标注。
+
+---
+
 ## 9. 已知限制与坑
 
 | 限制 | 说明 / 绕法 |
@@ -205,7 +225,12 @@ npm run edit:plan && npm run edit                 # 剪辑 demo → output/edit.
 
 # 渲染
 npx remotion render src/index.ts WebVideo output/intro10s.mp4 --codec=h264 --crf=18 --pixel-format=yuv420p
-# 期望：347 帧 / 11.567s / 1920x1080@30 / h264+aac48k / mean_volume ≈ -20dB
+# 期望：347 帧 / 11.567s / 1920x1080@30 / h264+aac48k / yuv420p / bt709 / tv
+#       mean_volume ≈ -19dB、整体响度 ≈ -16 LUFS（两遍 loudnorm 后）
+
+# 静态校验（应 0 错误），成片检查（应 0 错误且 color_space=bt709 / color_range=tv）
+python3 scripts/validate.py
+python3 scripts/validate.py --out output/intro10s.mp4
 
 # 剪辑：3 段异构素材（720p25有声 + 1080p30无声 + 640x480@24有声），2 个转场
 npm run assets && npm run edit

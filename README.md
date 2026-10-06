@@ -160,6 +160,10 @@ npm run edit                    # 真正执行
 停顿与配乐默认就开：**段间 400ms 真停顿**（不是无缝衔接）、**片尾 600ms 呼吸**、**BGM 侧链闪避**（一说话音乐自动压低）。
 
 > 背景音乐是 `scripts/make_bgm.py` 用代码合成的（正弦加法合成 + 和弦交叉淡化），**免版权、可商用、可无缝循环**。想换就丢一个 mp3 到 `assets/bgm.mp3`。
+>
+> 混音用**多频段 carve** 而不是整体压低：先 Linkwitz-Riley 分频（300Hz / 3400Hz），只对人声频段做侧链压限。
+> 实测同一条片子低频能量——不处理 −35.4dB / 整体闪避 −43.2dB（音乐瘪掉）/ carve −36.1dB（**音乐保住了**）。
+> 响度用两遍 `loudnorm`（线性增益），`--loudness-target social|podcast|broadcast` = −14 / −16 / −23 LUFS。
 
 ### 换成你自己的 TTS API
 
@@ -233,6 +237,7 @@ web-video-produce/
 │   ├─ tts_edge.py          # 配音 + 字幕 + 帧号时间轴（edge-tts / 自建 API / BGM / 停顿）
 │   ├─ tts_audition.py      # 同句多音色对照试听
 │   ├─ make_bgm.py          # 代码合成免版权 BGM
+│   ├─ validate.py          # 静态校验器（渲染前后各跑一次）
 │   ├─ vedit.py             # EDL 剪辑器（probe / plan / build / conform）
 │   ├─ mux.sh               # 混流 / 混音 / 烧字幕 / 响度归一
 │   ├─ capture_frames.mjs   # HTML 页面确定性逐帧截图（Playwright）
@@ -246,6 +251,21 @@ web-video-produce/
 ├─ public/voice/            # 生成的配音与时间轴（gitignore）
 └─ output/                  # 交付目录
 ```
+
+## 渲染前先自检
+
+```bash
+python3 scripts/validate.py                      # 源码 + 时间轴：1 秒内出结果
+python3 scripts/validate.py --out output/final.mp4   # 再加上成片规格、色彩空间、响度
+python3 scripts/validate.py --json               # Agent 友好
+```
+
+它检查：确定性铁律（`Math.random`/`Date.now`/自走动画）、`manifest.json ↔ config.ts` 的 fps 与时长一致性、
+场景 id 是否都在配音脚本里、`staticFile` 与 EDL 引用的素材是否存在、中文字体是否加载、
+成片的像素格式 / **色彩空间 bt709** / 色彩范围 tv / 峰值 / 平均音量 / 整体 LUFS。
+
+> 这个校验器抓到过一个真问题：Remotion 默认不传色彩参数，成片会写成 full-range `yuvj420p` + BT.601，
+> 上传到平台转码时颜色会漂。现在 `remotion.config.ts` 固定 `Config.setColorSpace('bt709')`。
 
 ## 常见问题
 
