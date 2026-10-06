@@ -1,0 +1,22 @@
+# 依赖与虚拟环境
+node_modules/
+.venv/
+.npm-cache/
+__pycache__/
+*.pyc
+
+# 中间产物
+work/
+frames/
+
+# 生成物（可随时重跑出来，不进仓库）
+output/
+public/voice/
+
+# demo 大素材（用 scripts/make_sample_assets.sh 重新生成）
+assets/sample/*.mp4
+assets/sample/bgm.mp3
+
+# 杂项
+*.log
+.DS_Store

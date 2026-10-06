@@ -1,0 +1,46 @@
+{
+  "name": "web-video-produce",
+  "version": "1.0.0",
+  "private": true,
+  "description": "用代码做视频：Remotion / Canvas / Three.js + edge-tts 配音 + FFmpeg 合成",
+  "scripts": {
+    "check": "bash scripts/check_env.sh",
+    "tts": "python3 scripts/tts_edge.py --script examples/script.intro10s.json --outdir public/voice --voice zh-CN-XiaoxiaoNeural --rate +5% --fps 30 --normalize",
+    "studio": "remotion studio src/index.ts",
+    "render": "remotion render src/index.ts WebVideo output/video_silent.mp4 --codec=h264 --crf=18 --pixel-format=yuv420p",
+    "mux": "bash scripts/mux.sh --video output/video_silent.mp4 --audio public/voice/vo.mp3 --out output/final.mp4",
+    "edit:plan": "python3 scripts/vedit.py plan --edl examples/edit-plan.example.json",
+    "edit": "python3 scripts/vedit.py build --edl examples/edit-plan.example.json",
+    "edit:probe": "python3 scripts/vedit.py probe assets/sample/clip_a.mp4 assets/sample/clip_b.mp4 assets/sample/clip_c.mp4",
+    "assets": "bash scripts/make_sample_assets.sh",
+    "cover": "remotion still src/index.ts Cover output/cover.png",
+    "browser": "remotion browser ensure",
+    "build": "remotion bundle src/index.ts",
+    "bgm": "python3 scripts/make_bgm.py --seconds 32 --out assets/bgm.mp3",
+    "audition": "python3 scripts/tts_audition.py --outdir output/voice_samples --rate +5%"
+  },
+  "dependencies": {
+    "@remotion/cli": "^4.0.0",
+    "@remotion/fonts": "^4.0.0",
+    "@remotion/google-fonts": "^4.0.0",
+    "@remotion/three": "^4.0.0",
+    "@react-three/fiber": "^8.17.10",
+    "gsap": "^3.12.5",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "remotion": "^4.0.0",
+    "three": "^0.170.0"
+  },
+  "devDependencies": {
+    "@fontsource/noto-sans-sc": "^5.1.0",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@types/three": "^0.170.0",
+    "typescript": "^5.6.3"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  }
+}

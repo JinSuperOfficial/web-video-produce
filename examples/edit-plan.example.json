@@ -1,0 +1,63 @@
+{
+  "title": "剪辑示例：3 段异构素材 + 2 个转场 + 水印 + BGM",
+  "note": "素材由 scripts/make_sample_assets.sh 生成。先跑 vedit.py plan 看命令，再跑 build。",
+
+  "output": {
+    "path": "output/edit.mp4",
+    "width": 1920,
+    "height": 1080,
+    "fps": 30,
+    "crf": 18,
+    "preset": "medium"
+  },
+
+  "conform": { "mode": "pad", "pad_color": "black" },
+
+  "aspect": { "preset": "keep" },
+
+  "timeline": [
+    {
+      "id": "a",
+      "src": "assets/sample/clip_a.mp4",
+      "in": "00:00:01.000",
+      "out": "00:00:05.000",
+      "speed": 1.0,
+      "audio": { "mode": "keep", "gain_db": -6, "fade_in": 0.3 },
+      "transition_out": { "type": "fade", "duration": 0.6 }
+    },
+    {
+      "id": "b",
+      "src": "assets/sample/clip_b.mp4",
+      "in": 0,
+      "out": 4.0,
+      "audio": { "mode": "mute" },
+      "transition_out": { "type": "wipeleft", "duration": 0.5 }
+    },
+    {
+      "id": "c",
+      "src": "assets/sample/clip_c.mp4",
+      "in": 0.5,
+      "out": 3.5,
+      "speed": 1.5,
+      "audio": { "mode": "keep", "gain_db": -4, "fade_out": 0.4 }
+    }
+  ],
+
+  "overlays": [
+    {
+      "src": "assets/sample/logo.png",
+      "position": "top-right",
+      "margin": 48,
+      "width": 200,
+      "opacity": 0.85,
+      "enable": "0:00-0:09"
+    }
+  ],
+
+  "audio_track": {
+    "bgm": "assets/sample/bgm.mp3",
+    "bgm_gain_db": -22,
+    "duck": true,
+    "loudnorm": -16
+  }
+}

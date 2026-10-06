@@ -1,0 +1,11 @@
+{
+  "title": "10 秒介绍：web-video-produce",
+  "fps": 30,
+  "note": "技能约束：口播稿不写句号（。）；断句用逗号，或直接分段（段间时长由 pause_after_ms 控制）。默认走整段韵律模式。",
+  "segments": [
+    { "id": "s1",  "text": "用代码做视频", "pause_after_ms": 0 },
+    { "id": "s2",  "text": "画面由代码生成，配音字幕自动对齐", "pause_after_ms": 0 },
+    { "id": "s3",  "text": "写一段脚本就能出片", "pause_after_ms": 0 },
+    { "id": "cta", "text": "文字，直接变成 MP4", "pause_after_ms": 0 }
+  ]
+}

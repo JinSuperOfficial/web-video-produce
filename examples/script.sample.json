@@ -1,0 +1,33 @@
+{
+  "title": "示例：60 秒产品介绍",
+  "fps": 30,
+  "segments": [
+    {
+      "id": "hook",
+      "text": "如果做一条视频，只需要把想法写成代码，会怎样？",
+      "pause_after_ms": 500
+    },
+    {
+      "id": "s1",
+      "text": "这是 web-video-produce。你描述画面，模型写代码，机器出片。",
+      "pause_after_ms": 400
+    },
+    {
+      "id": "s2",
+      "text": "画面可以是网页、Canvas 动画，也可以是三维场景与着色器。",
+      "pause_after_ms": 400
+    },
+    {
+      "id": "s3",
+      "text": "配音交给 edge-tts，字幕与时间轴自动生成，音画天然对齐。",
+      "pause_after_ms": 400
+    },
+    {
+      "id": "cta",
+      "text": "写完最后一帧，交给 FFmpeg，一条 MP4 就诞生了。",
+      "voice": "zh-CN-YunjianNeural",
+      "rate": "+0%",
+      "pause_after_ms": 0
+    }
+  ]
+}
