@@ -125,8 +125,14 @@ def check_timeline() -> dict | None:
     section("[2] 时间轴一致性")
     mpath = ROOT / "public/voice/manifest.json"
     if not mpath.exists():
-        bad("缺少 public/voice/manifest.json（先跑 tts_edge.py）")
-        add("error", "manifest_missing", "没有配音时间轴，画面无法对轴", "public/voice/manifest.json")
+        # 首次运行（刚 clone / 刚同步成 Skill）时这是**正常状态**，不是错误：
+        # 报成 error 会让 `wvp.py doctor` 在空项目上直接失败，看起来像环境坏了。
+        # 所以这里给 warn，并把"下一步该敲什么"写清楚。
+        warn("还没有配音时间轴（首次运行正常）→ 下一步：python3 scripts/wvp.py render")
+        add("warn", "manifest_missing",
+            "还没有配音时间轴，画面无法对轴。下一步：python3 scripts/wvp.py render"
+            "（只跑配音不渲染：加 --scale 0.5 --frames 0-60 先出样片）",
+            "public/voice/manifest.json")
         return None
     manifest = json.loads(mpath.read_text(encoding="utf-8"))
 
@@ -196,8 +202,16 @@ def check_assets() -> None:
                 missing.append((str(f.relative_to(ROOT)), ref))
     if missing:
         for where, ref in missing:
-            bad(f"staticFile('{ref}') 找不到对应文件（{where}）")
-            add("error", "asset_missing", f"public/{ref} 不存在", where)
+            if ref.endswith("/"):
+                # 模板串只留下了目录前缀（如 staticFile(`sfx/${file}`)）：
+                # 目录不存在通常是"素材还没生成/同步"，给 warn + 可操作提示，不用 error 卡住。
+                warn(f"public/{ref} 还不存在（{where}）→ 跑 `python3 scripts/wvp.py render` 会自动同步，"
+                     f"或先 `python3 scripts/make_sfx.py` 生成音效")
+                add("warn", "asset_dir_pending",
+                    f"public/{ref} 不存在（动态引用，素材还没生成或同步）", where)
+            else:
+                bad(f"staticFile('{ref}') 找不到对应文件（{where}）")
+                add("error", "asset_missing", f"public/{ref} 不存在", where)
     else:
         ok("staticFile 引用的素材都存在")
 

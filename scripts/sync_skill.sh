@@ -23,12 +23,14 @@ ITEMS=(
   references scripts src templates examples assets
 )
 # 目录内排除
-#   assets/sample/*.mp4 —— demo 素材（7MB+），用 `npm run assets` 现场生成即可，别塞进 Skill
+#   注意：rsync 的 --exclude 模式是**相对于每个被同步的子目录**的（这里逐个子目录同步），
+#   所以写 'sample/*.mp4' 而不是 'assets/sample/*.mp4' —— 后者永远匹配不上，
+#   结果是 7MB 的 demo 素材被静静地拷进 Skill（踩过）。
+#   assets/sample/*.mp4 —— demo 素材，用 `npm run assets` 现场生成即可
 EXCLUDES=(--exclude 'node_modules' --exclude '.venv' --exclude '__pycache__' \
           --exclude 'work' --exclude 'frames' --exclude 'output' \
           --exclude '*.log' --exclude '.git' --exclude 'public' \
-          --exclude 'assets/raw' --exclude 'assets/sample/*.mp4' \
-          --exclude 'assets/sample/*.mp3' )
+          --exclude 'raw' --exclude 'sample/*.mp4' --exclude 'sample/*.mp3' )
 
 echo "源:   $SRC"
 echo "目标: $DST"
@@ -43,7 +45,10 @@ for i in "${ITEMS[@]}"; do
   [ -e "$SRC/$i" ] || continue
   if [ -d "$SRC/$i" ]; then
     mkdir -p "$DST/$i"
-    rsync -a --delete "${EXCLUDES[@]}" "$SRC/$i/" "$DST/$i/"
+    # --delete-excluded：**连被排除的文件也从目标里删掉**。
+    # 不加这个开关的话，rsync 会"保护"目标里已存在但被排除的文件 ——
+    # 于是上一次同步留下的 assets/sample/*.mp4（7MB+）永远清不掉，Skill 目录越同步越大。
+    rsync -a --delete --delete-excluded "${EXCLUDES[@]}" "$SRC/$i/" "$DST/$i/"
   else
     cp -p "$SRC/$i" "$DST/$i"
   fi

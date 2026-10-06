@@ -290,6 +290,11 @@ def cmd_doctor(args: argparse.Namespace) -> int:
 
     # ---- 2. 工程静态校验（确定性/时间轴/素材/字体） ----
     step(2, 3, "工程静态校验（validate.py）")
+    # 先同步 assets/ → public/（sfx 等），否则静态校验会误报"素材缺失"。
+    # doctor 是只读体检，这里的同步是幂等的增量拷贝，不改动 assets/ 里的正本。
+    synced = sync_assets()
+    if synced:
+        log(f"  {DIM}· 已同步素材到 public/：{', '.join(synced)}{RESET}")
     code, data, _ = run_validate([], args.fast)
     print_findings(data)
     if code != 0:
@@ -375,7 +380,8 @@ def preview_frames(mp4: str, count: int, comp: str) -> list[str]:
 def load_timeline(voice_dir: Path) -> tuple[dict, dict | None]:
     mf = voice_dir / "manifest.json"
     if not mf.exists():
-        die(f"找不到 {mf}，先跑一次配音：python3 scripts/wvp.py render --no-render")
+        die(f"找不到 {mf}，先跑一次配音：python3 scripts/wvp.py render"
+            f"（只出配音不渲染时可以加 --scale 0.5 --frames 0-60 先看样片）")
     manifest = json.loads(mf.read_text(encoding="utf-8"))
     words = None
     wf = voice_dir / "words.json"

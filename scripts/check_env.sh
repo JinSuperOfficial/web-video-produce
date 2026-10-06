@@ -96,7 +96,7 @@ fi
 
 echo "== 6. 关键产物 =="
 [ -f public/voice/manifest.json ] && ok "配音时间轴 public/voice/manifest.json" \
-  || warnf "还没有配音 → python scripts/wvp.py render --no-render 或 python scripts/tts_edge.py --script examples/script.sample.json"
+  || warnf "还没有配音 → python3 scripts/wvp.py render（首次运行正常，不是环境问题）"
 [ -f public/voice/words.json ] && ok "词级时间戳 public/voice/words.json（可做卡拉OK 高亮）" \
   || warnf "没有词级时间戳 → 重跑一次配音即可（默认就会生成）"
 
