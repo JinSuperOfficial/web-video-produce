@@ -1,6 +1,8 @@
-# dsh-web-video · web-video-produce
+# web-video-produce · 写代码做视频
 
 > **让纯文本 LLM 生成视频（Code-To-Video）** · 使用 Web 架构 · 默认 edge-tts · 可以调用你自己的 TTS API
+
+用代码做视频与剪辑成片：脚本 → 配音 → **写代码** → 逐帧渲染 → MP4。
 
 <p>
 <img alt="license" src="https://img.shields.io/badge/license-MIT-5eead4">
@@ -57,8 +59,8 @@
 ## 快速开始
 
 ```bash
-git clone https://github.com/JinSuperOfficial/dsh-web-video.git
-cd dsh-web-video
+git clone https://github.com/JinSuperOfficial/web-video-produce.git
+cd web-video-produce
 
 # 1) 环境自检 + 工程校验 + 成片规格（一条命令问清楚）
 python3 scripts/wvp.py doctor

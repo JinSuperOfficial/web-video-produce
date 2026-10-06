@@ -500,7 +500,7 @@ def tts_http(args: argparse.Namespace, text: str) -> bytes:
         # HTTP 403 + "error code: 1010"（bot 特征检查）。curl 能通、Python 不能通，
         # 就是这个原因 —— 不是接口坏了，是 UA 被风控了。
         # 任何非 Python-urllib 的 UA 都能过（实测自定义工具 UA 也返回 200）。
-        "User-Agent": "web-video-produce/1.2 (+https://github.com/JinSuperOfficial/dsh-web-video)",
+        "User-Agent": "web-video-produce/1.2 (+https://github.com/JinSuperOfficial/web-video-produce)",
     }
     if key:
         headers["Authorization"] = f"Bearer {key}"

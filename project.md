@@ -13,7 +13,7 @@
 | --- | --- |
 | 一句话 | 让**纯文本 LLM** 具备"写代码做视频"的能力：文本 → 配音 → 画面代码 → 逐帧渲染 → MP4 |
 | 形态 | 一个 **DSH Skill**（`~/.dsh/skills/web-video-produce/`），同时是**独立可跑的项目** |
-| 仓库 | https://github.com/JinSuperOfficial/dsh-web-video |
+| 仓库 | https://github.com/JinSuperOfficial/web-video-produce |
 | 关键卖点 | ① 纯文本 LLM 可用（不需要多模态）② Web 技术栈 ③ 默认 edge-tts 免费出声 ④ **可接自己的 TTS API** ⑤ 附带 EDL 剪辑能力 |
 | 非目标 | 不做 GUI 时间线编辑器；不做自动粗剪（去静音/场景切分）；不做直播推流 |
 
