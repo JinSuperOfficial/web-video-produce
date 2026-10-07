@@ -17,7 +17,7 @@
 | 日本語 | [README_JA.md](./README_JA.md) | IN NEED |
 | 한국어 | [README_KO.md](./README_KO.md) | IN NEED |
 | Español | [README_ES.md](./README_ES.md) | IN NEED |
-| 文言 | [README_LZH.md](./README_LZH.md) | JUEST A JOKE |
+| 文言 | [README_LZH.md](./README_LZH.md) | JUST A JOKE |
  OTHER  -  If you wanna If you would like to add support for this language, you can submit PR
 
 > **核心特性**
