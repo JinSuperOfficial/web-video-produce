@@ -1,9 +1,4 @@
 # web-video-produce · 写代码做视频
-
-> **让纯文本 LLM 生成视频（Code-To-Video）** · 使用 Web 架构 · 默认 edge-tts · 可以调用你自己的 TTS API
-
-用代码做视频与剪辑成片：脚本 → 配音 → **写代码** → 逐帧渲染 → MP4。
-
 <p>
 <img alt="license" src="https://img.shields.io/badge/license-MIT-5eead4">
 <img alt="node" src="https://img.shields.io/badge/node-%E2%89%A518-3c873a">
@@ -11,14 +6,32 @@
 <img alt="python" src="https://img.shields.io/badge/python-%E2%89%A53.9-3776ab">
 <img alt="tts" src="https://img.shields.io/badge/TTS-edge--tts%20%7C%20%E8%87%AA%E5%BB%BA%20API-f0abfc">
 </p>
+# Language
+
+| Language | README |
+| --- | --- |
+| 汉语(简体) | 当前位置 |
+| 漢語(繁體) | [README_OCN.md](./README_OCN.md) |
+| English | [README_EN.md](./README_EN.md) |
+| 日本語 | [README_JP.md](./README_JP.md) |
+
+
+> Feature
+> **让纯文本 LLM (LLM) 生成视频（Code-To-Video）**
+>  [原理]使用 Web 架构
+>  [配音]默认 edge-tts ， 可以调用你自己的 TTS API（example.url/v1）
+
+让AI用代码做视频/剪辑成片：脚本 → 配音 → **写代码** → 逐帧渲染 → MP4。
 
 ![code to video](docs/images/hero.jpg)
 
 ▶ **示例成片**（11 秒，中文配音 + 字幕 + 自动配乐，全部由本仓库生成）：[`docs/sample-intro.mp4`](docs/sample-intro.mp4)
 
-一个 **DSH Skill**（也是独立可跑的项目）：把「写一段脚本 → 出一条带配音、字幕、背景音乐的 MP4」这件事，变成 LLM 可以自主完成的代码任务。
 
-它不依赖任何剪辑软件，也不需要多模态模型 —— **纯文本 LLM 就能用**：读文字、写代码、跑命令、看 `ffprobe` 输出、抽帧自检。
+一个 **DSH Skill**（也是独立可跑的项目）：把「写一段脚本 → 出一条带配音、字幕、背景音乐的 MP4」这件事，变成 LLM 可以自主完成的代码任务
+(其实是想做但没时间了，且token也不够了)
+
+它不依赖任何剪辑软件，也不需要多模态模型 —— **纯文本 LLM 就能用**：读文字、写代码、跑命令、看 `ffprobe` 输出、抽帧自检
 
 ---
 
@@ -32,8 +45,8 @@
 - [配音：默认 edge-tts，也可以换成你自己的](#配音默认-edge-tts也可以换成你自己的)
 - [剪辑模式（EDL 驱动）](#剪辑模式edl-驱动)
 - [目录结构](#目录结构)
-- [常见问题](#常见问题)
-- [License](#license)
+- [Q & A](#常见问题)
+- [许可证](#license)
 
 ---
 
@@ -62,13 +75,14 @@
 git clone https://github.com/JinSuperOfficial/web-video-produce.git
 cd web-video-produce
 
-# 1) 环境自检 + 工程校验 + 成片规格（一条命令问清楚）
+# 1) 运行自检程序，环境自检/工程校验/成片规格
 python3 scripts/wvp.py doctor
 
 # 2) 依赖
-npm install                     # 或 pnpm install
-npx remotion browser ensure     # 下载渲染用 Chrome Headless Shell（约 92MB，只下一次）
+npm install                     # 或其他
+npx remotion browser ensure     # 下载 Chrome Headless Shell
 python3 -m venv .venv && .venv/bin/pip install edge-tts
+# 加载虚拟环境，下载依赖(Edge-TTS)
 
 # 3) 出片：配音 → 时间轴校验 → 静态校验 → 渲染 → 补音轨 → 验收
 python3 scripts/wvp.py render --out output/intro10s.mp4
@@ -85,11 +99,13 @@ python3 scripts/vedit.py plan  --edl examples/edit-plan.example.json
 python3 scripts/vedit.py build --edl examples/edit-plan.example.json
 ```
 
-`wvp.py` 是本项目的统一入口，只有三个子命令（`doctor` / `render` / `timeline`）——
-不用再记 `check_env.sh`、`validate.py`、`tts_edge.py`、`remotion render`、`mux.sh`、`ffprobe`
-这一串工具的调用顺序。
+`wvp.py` 是本项目的统一入口，只有三个子命令（`doctor` / `render` / `timeline`
 
-**环境要求**：Node ≥ 18、Python ≥ 3.9、FFmpeg ≥ 6（需要 `libx264` / `aac` / `libass`）。Windows / macOS / Linux 均可。
+**环境要求**：
+1. Node ≥ 18
+2. Python ≥ 3.9
+3. FFmpeg ≥ 6（需要 `libx264` / `aac` / `libass`）
+4. Windows / macOS / Linux 均可
 
 ## 工作流
 
@@ -98,10 +114,10 @@ python3 scripts/vedit.py build --edl examples/edit-plan.example.json
 ```
 文本 → 分段脚本(JSON) → edge-tts 配音 + 字幕 + 帧号时间轴 + 逐词时间戳
                               ↓
-                    Remotion / React / Three.js / Canvas 写画面
-                    （motion 动作库 + transitions 转场层 + SFX 音效轨）
+            Remotion / React / Three.js / Canvas 写画面
+         （motion 动作库 + transitions 转场层 + SFX 音效轨）
                               ↓
-                    逐帧渲染 → FFmpeg 合成 → MP4
+                  帧渲染 → FFmpeg 合成 → MP4
 ```
 
 配音这一步会产出四样东西，它们是一切的锚点：
@@ -178,8 +194,8 @@ python3 scripts/vedit.py build --edl examples/edit-plan.example.json
 
 只要你的服务能"给文本、还音频"，就能接进来 —— 语音合成的时间和字幕逻辑完全复用。
 
-**A. OpenAI 兼容的 `/audio/speech`**（OpenAI、SiliconFlow、智谱、火山方舟等多数厂商都有这个形状）
-
+**A. OpenAI 兼容的 `/audio/speech`**（OpenAI、SiliconFlow、智谱、火山方舟等多数厂商都行这个形状）
+(本地的没试过，但概率也行......)
 ```bash
 export TTS_API_KEY=sk-xxxx        # 或 --tts-api-key
 
@@ -194,8 +210,8 @@ export TTS_API_KEY=sk-xxxx        # 或 --tts-api-key
 
 **B. VoiceCraft 系接口**（`POST /v1/audio/speech`，字段 `input` / `voice` / `speed` / `pitch` / `style` / `volume`）
 
-这个形状来自开源项目 [JinSuperOfficial/tts-voice-magic](https://github.com/JinSuperOfficial/tts-voice-magic)
-（VoiceCraft，基于微软 Edge TTS，可一键部署到 Cloudflare Workers）。它比 A 多一个 `style`
+这个来自开源项目 [JinSuperOfficial/tts-voice-magic](https://github.com/JinSuperOfficial/tts-voice-magic)
+原tts项目作者见该tts仓库上游（VoiceCraft，基于微软 Edge TTS，可一键部署到 Cloudflare Workers）。它比 A 多一个 `style`
 情感/角色参数（`general` / `newscast` / `cheerful` / `serious` / `gentle` …）。
 
 ```bash
@@ -208,8 +224,8 @@ export TTS_API_KEY=sk-xxxx        # 或 --tts-api-key
   --voice zh-CN-XiaoxiaoNeural \
   --rate +5% --tts-style newscast
 ```
-
-> ⚠️ 一个实测踩到的坑：Cloudflare 前置的站点会拦掉 Python 默认的 User-Agent
+> [!WARNING]
+> 一个实测踩到的坑：Cloudflare 前置的站点会拦掉 Python 默认的 User-Agent
 > （`Python-urllib/3.x` → `HTTP 403 error code: 1010`），而 `curl` 是通的。
 > 脚本已默认带正常 UA，所以开箱可用；换别的 HTTP 客户端时要自己设 UA。
 
@@ -229,7 +245,7 @@ export TTS_API_KEY=sk-xxxx        # 或 --tts-api-key
 > 自建引擎拿不到逐词边界，因此会自动改用分段模式（每段一次请求）—— 时间轴由 `ffprobe` 回读，依然精确；
 > 字幕按"一句一段"生成，`words.json` 如实标注 `precision: "none"`，不假装有逐词精度。
 
-## 剪辑模式（EDL 驱动）
+## 剪辑模式（EDL 驱动）[Experimental]
 
 ![editing](docs/images/editing.jpg)
 
