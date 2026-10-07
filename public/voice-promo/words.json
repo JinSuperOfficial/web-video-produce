@@ -1,0 +1,12 @@
+{
+  "fps": 30,
+  "audio": "vo.mp3",
+  "mode": "segment",
+  "precision": "none",
+  "source": "unavailable",
+  "total_duration": 73.75,
+  "total_frames": 2212,
+  "word_count": 0,
+  "words": [],
+  "note": "分段模式下未拿到词边界（引擎不支持，或用了 --no-words）；字幕仍与音频严格对齐，只是没有逐词精度"
+}

@@ -1,0 +1,77 @@
+{
+  "title": "web-video-produce 项目推广片（B 站 · 1920x1080 / 30fps / 约 64 秒）",
+  "fps": 30,
+  "note": "口播稿硬约束：不写句号（。）；逗号断句；单段尽量 12-20 字；段间插真停顿（pause_after_ms）。整段韵律模式 + 语速 +0%（语速正常）。所有卖点与数据均取自 README.md，未杜撰。专名读法已用 edge-tts WordBoundary 实测：web/video/produce 会被读成三个英文单词，故首次出现改用中文，英文只留在屏幕与 CTA；EDL 连写读法不可靠，口播改为剪辑清单，EDL 只出现在画面。",
+  "segments": [
+    {
+      "id": "hook",
+      "text": "这条视频，全程由代码生成",
+      "pause_after_ms": 350
+    },
+    {
+      "id": "intro",
+      "text": "这是网页视频生成项目，把做视频变成写代码的开源技能",
+      "pause_after_ms": 400
+    },
+    {
+      "id": "pain",
+      "text": "拍摄、剪辑、对轴、配字幕，一条片子磨一整天",
+      "pause_after_ms": 400
+    },
+    {
+      "id": "idea",
+      "text": "在这里，视频不是剪出来的，是算出来的",
+      "pause_after_ms": 500
+    },
+    {
+      "id": "pipeline",
+      "text": "写下分段脚本，配音字幕全自动，时间轴精确到帧",
+      "pause_after_ms": 400
+    },
+    {
+      "id": "render",
+      "text": "画面用 React 和 Remotion 写，每一帧都是纯函数",
+      "pause_after_ms": 400
+    },
+    {
+      "id": "stack",
+      "text": "Canvas 画图表，三维用 Three 点 JS，着色器现场生成像素",
+      "pause_after_ms": 400
+    },
+    {
+      "id": "edit",
+      "text": "实拍素材也能进，一份剪辑清单搞定裁剪、拼接和转场",
+      "pause_after_ms": 400
+    },
+    {
+      "id": "voice",
+      "text": "配音走 edge tts，十四种中文音色随便挑",
+      "pause_after_ms": 400
+    },
+    {
+      "id": "polish",
+      "text": "去掉句号，整段韵律，语速不超百分之五，听感立刻像真人",
+      "pause_after_ms": 400
+    },
+    {
+      "id": "mix",
+      "text": "音乐由代码合成，多频段侧链闪避，人声一响就自动让路",
+      "pause_after_ms": 400
+    },
+    {
+      "id": "verify",
+      "text": "交付前自动验收，色彩空间、峰值、响度一次查完",
+      "pause_after_ms": 400
+    },
+    {
+      "id": "cta",
+      "text": "开源在 GitHub，搜 web video produce，顺手来个一键三连",
+      "pause_after_ms": 500
+    },
+    {
+      "id": "end",
+      "text": "写代码，做视频",
+      "pause_after_ms": 0
+    }
+  ]
+}

@@ -24,7 +24,7 @@ assets/sample/bgm.mp3
 *.log
 .DS_Store
 
-# 第三方参考材料（只读参考，绝不上传、绝不复制其内容）
-# 这些文件可能带 Apache/其他许可，仅作本地思路参考
+
+# 给AI参考的，一般放参考项目，没有直接抄的!
 ref/
 ref.tmp/

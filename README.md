@@ -6,27 +6,35 @@
 <img alt="python" src="https://img.shields.io/badge/python-%E2%89%A53.9-3776ab">
 <img alt="tts" src="https://img.shields.io/badge/TTS-edge--tts%20%7C%20%E8%87%AA%E5%BB%BA%20API-f0abfc">
 </p>
-# Language
 
-| Language | README |
-| --- | --- |
-| 汉语(简体) | 当前位置 |
-| 漢語(繁體) | [README_OCN.md](./README_OCN.md) |
-| English | [README_EN.md](./README_EN.md) |
-| 日本語 | [README_JP.md](./README_JP.md) |
+## Language
 
+| Language | README | Status |
+| --- | --- | --- |
+| 简体中文 | 当前位置 | OK |
+| 繁體中文 | [README_ZH-HANT.md](./README_ZH-HANT.md) | OK |
+| English | [README_EN.md](./README_EN.md) | OK |
+| 日本語 | [README_JA.md](./README_JA.md) | IN NEED |
+| 한국어 | [README_KO.md](./README_KO.md) | IN NEED |
+| Español | [README_ES.md](./README_ES.md) | IN NEED |
+| 文言 | [README_LZH.md](./README_LZH.md) | JUEST A JOKE |
+ OTHER  -  If you wanna If you would like to add support for this language, you can submit PR
 
-> Feature
-> **让纯文本 LLM (LLM) 生成视频（Code-To-Video）**
->  [原理]使用 Web 架构
->  [配音]默认 edge-tts ， 可以调用你自己的 TTS API（example.url/v1）
+> **核心特性**
+> - 让纯文本 LLM 生成视频（Code-To-Video）
+> - 原理：使用 Web 架构
+> - 配音：默认 edge-tts，也可以调用你自己的 TTS API（example.url/v1）
 
 让AI用代码做视频/剪辑成片：脚本 → 配音 → **写代码** → 逐帧渲染 → MP4。
 
 ![code to video](docs/images/hero.jpg)
 
-▶ **示例成片**（11 秒，中文配音 + 字幕 + 自动配乐，全部由本仓库生成）：[`docs/sample-intro.mp4`](docs/sample-intro.mp4)
+▶ **示例成片**（11 秒，中文配音 + 字幕 + 自动配乐，全部由本仓库生成）
 
+[![示例成片封面](docs/images/sample-cover.jpg)](https://www.bilibili.com/video/BV11tpw63Eoh)
+
+- B 站：[BV11tpw63Eoh](https://www.bilibili.com/video/BV11tpw63Eoh)
+- 原始文件：[`docs/sample-intro.mp4`](docs/sample-intro.mp4)
 
 一个 **DSH Skill**（也是独立可跑的项目）：把「写一段脚本 → 出一条带配音、字幕、背景音乐的 MP4」这件事，变成 LLM 可以自主完成的代码任务
 (其实是想做但没时间了，且token也不够了)
@@ -62,7 +70,7 @@
 
 ## 两条能力
 
-| | 输入 | 做什么 | 输出 |
+| 能力 | 输入 | 做什么 | 输出 |
 | --- | --- | --- | --- |
 | **生成** | 一段文案 / 一个主题 | 分段 → 配音+字幕时间轴 → 写视觉代码 → 逐帧渲染 → 合成 | `output/final.mp4` |
 | **剪辑** | 已有素材（自己的/别人给的） | EDL 声明式时间线 → conform 标准化 → 裁剪/转场/水印/画幅/压缩 | `output/edit.mp4` |
@@ -70,6 +78,8 @@
 两条路线可以混合：Remotion 生成的动画片段，可以像普通素材一样写进剪辑时间线。
 
 ## 快速开始
+
+**macOS / Linux（Bash，也适用于 Windows 的 Git Bash / WSL）**
 
 ```bash
 git clone https://github.com/JinSuperOfficial/web-video-produce.git
@@ -99,7 +109,38 @@ python3 scripts/vedit.py plan  --edl examples/edit-plan.example.json
 python3 scripts/vedit.py build --edl examples/edit-plan.example.json
 ```
 
-`wvp.py` 是本项目的统一入口，只有三个子命令（`doctor` / `render` / `timeline`
+**Windows PowerShell**
+
+```powershell
+git clone https://github.com/JinSuperOfficial/web-video-produce.git
+cd web-video-produce
+
+# 1) 运行自检程序，环境自检/工程校验/成片规格
+python .\scripts\wvp.py doctor
+
+# 2) 依赖
+npm install                     # 或其他
+npx remotion browser ensure     # 下载 Chrome Headless Shell
+python -m venv .venv
+.venv\Scripts\pip.exe install edge-tts
+# 加载虚拟环境，下载依赖(Edge-TTS)
+
+# 3) 出片：配音 → 时间轴校验 → 静态校验 → 渲染 → 补音轨 → 验收
+python .\scripts\wvp.py render --out output\intro10s.mp4
+#    先出 2 秒半分辨率样片更省时间：--scale 0.5 --frames 0-60
+#    复用已有配音：--no-tts
+
+# 4) 检查时间轴：段/帧/词对不对齐（--verify-audio 会解码音轨实测）
+python .\scripts\wvp.py timeline --words
+python .\scripts\wvp.py timeline --verify-audio
+
+# 5) 剪辑路线：先看命令，再动手
+python .\scripts\vedit.py transitions                        # 不知道用哪种转场时
+python .\scripts\vedit.py plan  --edl examples\edit-plan.example.json
+python .\scripts\vedit.py build --edl examples\edit-plan.example.json
+```
+
+`wvp.py` 是本项目的统一入口，只有三个子命令（`doctor` / `render` / `timeline`）。
 
 **环境要求**：
 1. Node ≥ 18
@@ -245,7 +286,10 @@ export TTS_API_KEY=sk-xxxx        # 或 --tts-api-key
 > 自建引擎拿不到逐词边界，因此会自动改用分段模式（每段一次请求）—— 时间轴由 `ffprobe` 回读，依然精确；
 > 字幕按"一句一段"生成，`words.json` 如实标注 `precision: "none"`，不假装有逐词精度。
 
-## 剪辑模式（EDL 驱动）[Experimental]
+## 剪辑模式（EDL 驱动）
+
+> [!NOTE]
+> Experimental
 
 ![editing](docs/images/editing.jpg)
 

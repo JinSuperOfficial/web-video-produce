@@ -10,7 +10,7 @@
 ----
 python3 scripts/make_bgm.py                       # 默认 32 秒 → assets/bgm.mp3
 python3 scripts/make_bgm.py --seconds 48 --out assets/bgm-long.mp3
-python3 scripts/make_bgm.py --key D --progression Am7 Fmaj7 Cmaj7 G6
+python3 scripts/make_bgm.py --key D --progression Am F C G     # 纯三和弦，更硬朗
 
 设计要点
 --------
@@ -55,6 +55,12 @@ PROGRESSIONS = {
     "G6": [("G2", 1.00), ("B3", 0.62), ("D4", 0.50), ("E4", 0.34), ("G4", 0.18)],
     "Dm7": [("D3", 1.00), ("F3", 0.62), ("A3", 0.50), ("C4", 0.34), ("D4", 0.18)],
     "Em7": [("E2", 1.00), ("G3", 0.62), ("B3", 0.50), ("D4", 0.34), ("E4", 0.18)],
+    # 纯三和弦 —— 即把上面 Fmaj7 / Cmaj7 的大七度音去掉（Fmaj7 去掉 E4，Cmaj7 去掉 B3）。
+    # 大七度正是"柔和抒情"的来源，去掉后走向更硬、更有推动力，适合科技/宣传片。
+    # 用法：--progression Am F C G
+    "F": [("F2", 1.00), ("A3", 0.62), ("C4", 0.50), ("F4", 0.18)],
+    "C": [("C3", 1.00), ("E3", 0.62), ("G3", 0.50), ("C5", 0.16)],
+    "G": [("G2", 1.00), ("B3", 0.62), ("D4", 0.50), ("G4", 0.18)],
 }
 
 
